@@ -1,0 +1,51 @@
+Microsoft Windows [Version 6.1.7601]
+Copyright (c) 2009 Microsoft Corporation.  All rights reserved.
+
+C:\Users\engs1>cd C:\GNAFAPI
+
+C:\GNAFAPI>C:\Users\engs1\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f
+7fe636a147ff37326ad\cmd\git add R
+
+C:\GNAFAPI>C:\Users\engs1\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f
+7fe636a147ff37326ad\cmd\git add man
+
+C:\GNAFAPI>C:\Users\engs1\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f
+7fe636a147ff37326ad\cmd\git commit
+error: cannot spawn gitpad: No such file or directory
+error: unable to start editor 'gitpad'
+Please supply the message using either -m or -F option.
+
+C:\GNAFAPI>C:\Users\engs1\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f
+7fe636a147ff37326ad\cmd\git commit -m "Commit message"
+[master eae308b] Commit message
+ Committer: unknown <engs1@LPC2441.citywestwater.com.au>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly:
+
+    git config --global user.name "Your Name"
+    git config --global user.email you@example.com
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 1 file changed, 749 insertions(+)
+ create mode 100644 R/DynamicSource.R
+
+C:\GNAFAPI>C:\Users\engs1\AppData\Local\GitHub\PortableGit_c2ba306e536fdf878271f
+7fe636a147ff37326ad\cmd\git push origin master
+github --credentials get: github: command not found
+Username for 'https://github.com': engsophe
+Password for 'https://engsophe@github.com':
+github --credentials store: github: command not found
+Counting objects: 6, done.
+Delta compression using up to 4 threads.
+Compressing objects: 100% (4/4), done.
+Writing objects: 100% (4/4), 6.97 KiB | 0 bytes/s, done.
+Total 4 (delta 1), reused 0 (delta 0)
+remote: Resolving deltas: 100% (1/1), completed with 1 local objects.
+To https://github.com/phillipf/GNAFAPI.git
+   f0c7378..eae308b  master -> master
+
+C:\GNAFAPI>
