@@ -3,31 +3,71 @@
 
 # Getting started ####
 # Packages:
-install.packages("rgdal")
-install.packages("rgeos")
-install.packages("maptools")
-install.packages("stringr")
-install.packages("raster")
-install.packages("spdep")
 
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(sp)
-library(rgdal)
-library(rgeos)
-library(stringi)
-library(stringr)
-library(maptools)
-library(RODBC)
+check_pkg_deps <- function() {
+  if(!require(tidyr)) {
+    message("installing the 'readr' package")
+    install.packages("readr")
+  }
 
-#library(raster)
-#library(spdep)
+  if(!require(dplyr)) {
+    message("installing the 'dplyr' package")
+    install.packages("dplyr")
+  }
 
-#detach("package:spdep", unload=TRUE)
-#detach("package:raster", unload=TRUE)
-#detach("package:data.table", unload=TRUE)
-#detach("package:dtplyr", unload=TRUE)
+  if(!require(ggplot2)) {
+    message("installing the 'ggplot2' package")
+    install.packages("ggplot2")
+  }
+
+  if(!require(sp)) {
+    message("installing the 'sp' package")
+    install.packages("sp")
+  }
+
+  if(!require(rgdal)) {
+    message("installing the 'rgdal' package")
+    install.packages("rgdal")
+  }
+
+  if(!require(rgeos)) {
+    message("installing the 'rgeos' package")
+    install.packages("rgeos")
+  }
+
+  if(!require(stringi)) {
+    message("installing the 'stringi' package")
+    install.packages("stringi")
+  }
+
+  if(!require(stringr)) {
+    message("installing the 'stringr' package")
+    install.packages("stringr")
+  }
+
+  if(!require(maptools)) {
+    message("installing the 'maptools' package")
+    install.packages("maptools")
+  }
+
+  if(!require(RODBC)) {
+    message("installing the 'RODBC' package")
+    install.packages("RODBC")
+  }
+
+  if(!require(raster)) {
+    message("installing the 'raster' package")
+    install.packages("raster")
+  }
+
+  if(!require(spdep)) {
+    message("installing the 'spdep' package")
+    install.packages("spdep")
+  }
+
+}
+
+check_pkg_deps()
 
 # Functions:
 # Data cleansing
@@ -66,7 +106,7 @@ CWW_DW <- odbcDriverConnect(connection="Driver={SQL Server Native Client 11.0};
                             uid=Report;
                             pwd=report")
 #
-# Filtering aids (single source files) #### 
+# Filtering aids (single source files) ####
 # Filter 1: Flat files of linked property coordinates
 # Property: Original file - Static Snapshot
 Property_dt <- read.csv("N:/KarlBlackhall/Gentrack AL/PROPERTY_LAYER_V2.csv", stringsAsFactors = FALSE) %>%
@@ -74,11 +114,11 @@ Property_dt <- read.csv("N:/KarlBlackhall/Gentrack AL/PROPERTY_LAYER_V2.csv", st
 
 # Property: PP- Static Results of Property attached to Cadastre Attribute GID
 Property_GID <- read.csv('N:/KarlBlackhall/Gentrack AL/Phil - DataValidation/PROPERTY_LAYER_OVERLAY.csv',
-                         sep = ",", 
+                         sep = ",",
                          stringsAsFactors = FALSE)
 
 # Filter 2: List of Barred ANZSIC Codes
-ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_ANZSIC_bar.csv", 
+ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_ANZSIC_bar.csv",
                            stringsAsFactors = FALSE) %>%
   left_join(select(ABR_Full, LocationIndustryClass, LocationIndustryClassDescription),
             by = c("LocationIndustryClass")) %>%
@@ -88,9 +128,9 @@ ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_
   left_join(select(Map_IndustryEndUse, ANZSIC, Guardian_description, Sector, Industry, Water_connect_status, EU_BlockWater),
             by = c("LocationIndustryClass" ="ANZSIC"))
 
-# Filter 3: Spatial Supports 
+# Filter 3: Spatial Supports
 # CWW Boundary Region
-CWWBoundary <- readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp", 
+CWWBoundary <- readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp",
                        layer="CWW Boundary_2014_region")
 
 # Source 1: Australian Business Register (ABR) ####
@@ -118,7 +158,7 @@ ABR_Master <- sqlQuery(CWW_DW, "SELECT [PID]
                      ,[LocationIndustryClassDescription]
                      FROM [CWW_DW].[dbo].[ABR_Businesslocation_20161024]
                      WHERE [STATE] = 'VIC'",
-                     stringsAsFactors = FALSE) 
+                     stringsAsFactors = FALSE)
 
 ABR_Full <- ABR_Master %>%
   filter(!is.na(GNAFPID),
@@ -126,12 +166,12 @@ ABR_Full <- ABR_Master %>%
 
 ABR_Full$row = 1:nrow(ABR_Full)
 
-ABR_DSP1 <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Full$Longitude, 
+ABR_DSP1 <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Full$Longitude,
                                                          y = ABR_Full$Latitude,
                                                          stringsAsFactors = FALSE),
                                      data=data.frame(PID = ABR_Full$row),
                                      proj4string= CRS("+proj=longlat +datum=WGS84")) %>%
-  spTransform(CRS(proj4string(CWWBoundary))) 
+  spTransform(CRS(proj4string(CWWBoundary)))
 
 ABR_Dynamic <- ABR_Full[which(gContains(CWWBoundary, ABR_DSP1, byid = TRUE)), ] %>%
   mutate(LocationStartDate = convert(LocationStartDate)) %>%
@@ -151,12 +191,12 @@ ABR_Other$Suburb[8] %in% unique(ABR_Within$Suburb)
 
 ABR_Dynamic[ABR_Dynamic$Suburb == "GEELONG",] %>% sample_n(1)
 
-ABR_Dynamic_SP <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Dynamic$Longitude, 
+ABR_Dynamic_SP <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Dynamic$Longitude,
                                                              y = ABR_Dynamic$Latitude,
                                                              stringsAsFactors = FALSE),
                                          data=data.frame(PID = ABR_Dynamic$PID),
                                          proj4string= CRS("+proj=longlat +datum=WGS84"))  %>%
-  spTransform(CRS(proj4string(CWWBoundary))) 
+  spTransform(CRS(proj4string(CWWBoundary)))
 writeOGR(ABR_Dynamic_SP, ".", "ABR_Dynamic_SP", driver="ESRI Shapefile")
 
 # Change over time - establishing the boundaries
@@ -164,7 +204,7 @@ ABR_Change1 <- select(ABR_Dynamic, GNAFPID, PID) %>%
   group_by(GNAFPID, PID) %>%
   summarise(n_GNAF = n(),
             n_PID = n(),
-            PID_affected = paste0("",unlist(list(as.character(unique(PID)))), collapse = "; ")) 
+            PID_affected = paste0("",unlist(list(as.character(unique(PID)))), collapse = "; "))
 
 ABR_Alternates <- ABR_Dynamic %>%
   filter(LocationType=='15')
@@ -181,16 +221,16 @@ ABR_Change4 <- ABR_Dynamic %>%
 
 ABR_Beta <- select(ABR_Dynamic, PID, GNAFPID) %>%
   mutate(UID = paste0(GNAFPID,"_", PID)) %>% select(UID) %>% unique() %>%
-  left_join(select(ABR_GNAF, GNAF, UID, LOCALITY_NAME, POSTCODE, CONFIDENCE, ALIAS_PRINCIPAL), 
+  left_join(select(ABR_GNAF, GNAF, UID, LOCALITY_NAME, POSTCODE, CONFIDENCE, ALIAS_PRINCIPAL),
             by = c("UID"))
 
 ABR_TestDup <- ABR_Dynamic %>%
-  mutate(UID = paste0(GNAFPID,"_", PID)) %>% 
+  mutate(UID = paste0(GNAFPID,"_", PID)) %>%
   subset.data.frame(UID %in% ABR_Beta$UID[duplicated(ABR_Beta$UID)])
 write.table(ABR_TestDup, "SNAP_UID_TestDup.csv", sep = ",", row.names = FALSE)
 
-# 
-# Exploration ABR: Testing of parameters 
+#
+# Exploration ABR: Testing of parameters
 # Summary of the current:
 ABR_DynamicSummary <- select(ABR_Dynamic, PID, LocationIndustryClass, LocationIndustryClassDescription) %>%
   group_by(LocationIndustryClass) %>%
@@ -198,21 +238,21 @@ ABR_DynamicSummary <- select(ABR_Dynamic, PID, LocationIndustryClass, LocationIn
             n_Dynamic = n()) %>%
   left_join(select(Map_IndustryEndUse, ANZSIC, Guardian_description, Sector, Industry, Water_connect_status, EU_BlockWater),
             by = c("LocationIndustryClass" ="ANZSIC"))
- 
+
 ABR_Summary <- ABR_DynamicSummary %>%
   left_join(select(ABR_BaselineSummary, LocationIndustryClass, n_Baseline),
-            by = c("LocationIndustryClass")) %>% 
-  select(LocationIndustryClass, Description, 
+            by = c("LocationIndustryClass")) %>%
+  select(LocationIndustryClass, Description,
          Guardian_description:EU_BlockWater,
          n_Dynamic, n_Baseline) %>%
   mutate(n_Diff = n_Dynamic - n_Baseline)
 
-write.table(ABR_Summary, "09232016_ABR_IndustryCount_Mar2016.csv", sep = ",", row.names = FALSE) 
+write.table(ABR_Summary, "09232016_ABR_IndustryCount_Mar2016.csv", sep = ",", row.names = FALSE)
 
-ABR_Attributes_AL1_Pf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test1_define.csv", 
-                                  stringsAsFactors = FALSE) 
-ABR_Attributes_AL1_Sf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test2b_define.csv", 
-                                  stringsAsFactors = FALSE) 
+ABR_Attributes_AL1_Pf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test1_define.csv",
+                                  stringsAsFactors = FALSE)
+ABR_Attributes_AL1_Sf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test2b_define.csv",
+                                  stringsAsFactors = FALSE)
 
 # Addressr: Creating clean mirror of ABR addresses
 addressr <- function(ABR_Select) {
@@ -253,20 +293,20 @@ ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
          n2 = word(t6,-1),
          n2 = ifelse(SAttribute4.x=="STREET"|SAttribute4.x=="AREA",
                      n2,NA),
-         t10 = ifelse(PAttribute2=="UNIT", 
-                      paste0(gsub("\\W+","",n1),"/",t10), 
+         t10 = ifelse(PAttribute2=="UNIT",
+                      paste0(gsub("\\W+","",n1),"/",t10),
                       t10),
-         t11 = ifelse(t10 == "", 
+         t11 = ifelse(t10 == "",
                       paste(AddressLine1, AddressLine2),
                       t10)) %>%
   mutate(F6 = paste0(n1,"/",n2),
          F6 = ifelse(is.na(n1), n2,
-                     ifelse(is.na(n2), 
-                            n1, 
+                     ifelse(is.na(n2),
+                            n1,
                             F6)),
          F7 = ifelse(is.na(t7), F6,
-                     ifelse(is.na(F6)|F6=="[0-9]", 
-                            t7, 
+                     ifelse(is.na(F6)|F6=="[0-9]",
+                            t7,
                             t7)),
          F1 = str_split(AddressLine1, "[0-9]"),
          F1 = sapply(F1, unlist),
@@ -275,16 +315,16 @@ ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
          F11 = gsub("^([A-Z]){1}\\s(.+)", "\\2", F11),
          Clean = ifelse((t3 ==3&t5 ==1&(SAttribute4.x=="STREET"|SAttribute4.x=="AREA")),
                         (paste(t1,F11,SAttribute3.x)),
-                        ifelse(t5 != -1&SAttribute4.x=="STREET"|SAttribute4.x=="AREA", 
-                               paste(F7, F11, SAttribute3.x), 
+                        ifelse(t5 != -1&SAttribute4.x=="STREET"|SAttribute4.x=="AREA",
+                               paste(F7, F11, SAttribute3.x),
                                 NA)),
          Clean = ifelse(is.na(Clean), paste(t11, SAttribute3.y),
                                        Clean),
-         Clean = ifelse(Clean == "NA NA", 
+         Clean = ifelse(Clean == "NA NA",
                         paste(AddressLine1,AddressLine2),
                                        Clean),
          C1 = sapply(str_split(Clean, " "), length),
-         Clean = ifelse((C1 == 2|t5 == "-1"), 
+         Clean = ifelse((C1 == 2|t5 == "-1"),
                         paste(AddressLine1,AddressLine2),
                         Clean),
          Clean = str_extract_all(Clean, "\\d+\\D+"),
@@ -302,12 +342,12 @@ ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
          F12 = str_trim(sapply(F12, function(x) x[length(x)]),side = "both"),
          F13 = sub('(.*)\\s+(\\S+)$', '\\1', F12),
          CALT2 = ifelse(word(Clean, -1) == t12, paste(n3,F13, SAttribute3.y), NA ),
-         Clean = ifelse((C1 == 2|t5 == "-1"), 
+         Clean = ifelse((C1 == 2|t5 == "-1"),
                         CALT2,
-                        Clean)) %>% 
+                        Clean)) %>%
   select(-C1)
 
-ABR_Address <- select(ABR_Address, PID:Postcode, Clean) 
+ABR_Address <- select(ABR_Address, PID:Postcode, Clean)
 
 return(ABR_Address)
 }
@@ -330,17 +370,17 @@ library(spdep) # spatial dependence
 library(lubridate)
 
 # Inputs
-GNAF_DefaultGeocode <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_ADDRESS_DEFAULT_GEOCODE_psv.psv", 
-                                sep = "|", stringsAsFactors = FALSE) 
-GNAF_Detail <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_ADDRESS_DETAIL_psv.psv", 
-                        sep = "|", stringsAsFactors = FALSE) 
-GNAF_StreetLocal <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_STREET_LOCALITY_psv.psv", 
-                             sep = "|", stringsAsFactors = FALSE) 
-GNAF_Local <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_LOCALITY_psv.psv", 
-                       sep = "|", stringsAsFactors = FALSE) 
+GNAF_DefaultGeocode <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_ADDRESS_DEFAULT_GEOCODE_psv.psv",
+                                sep = "|", stringsAsFactors = FALSE)
+GNAF_Detail <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_ADDRESS_DETAIL_psv.psv",
+                        sep = "|", stringsAsFactors = FALSE)
+GNAF_StreetLocal <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_STREET_LOCALITY_psv.psv",
+                             sep = "|", stringsAsFactors = FALSE)
+GNAF_Local <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/VIC_LOCALITY_psv.psv",
+                       sep = "|", stringsAsFactors = FALSE)
 
 # Default Geocode
-GNAF_DSP <- SpatialPointsDataFrame(coords = data.frame(x = GNAF_DefaultGeocode$LONGITUDE, 
+GNAF_DSP <- SpatialPointsDataFrame(coords = data.frame(x = GNAF_DefaultGeocode$LONGITUDE,
                                                        y = GNAF_DefaultGeocode$LATITUDE,
                                                        stringsAsFactors = FALSE),
                                    data=data.frame(ADDRESS_DEFAULT_GEOCODE_PID = GNAF_DefaultGeocode$ADDRESS_DEFAULT_GEOCODE_PID),
@@ -354,9 +394,9 @@ GNAF_DSP_data <- GNAF_DSP@data
 ABR_GNAF <- select(ABR_Dynamic, PID, GNAFPID) %>%
   left_join(ABR_Address,
             by = c("PID")) %>%
-  left_join(select(GNAF_Detail, LEVEL_NUMBER_PREFIX, ADDRESS_DETAIL_PID, FLAT_NUMBER, 
+  left_join(select(GNAF_Detail, LEVEL_NUMBER_PREFIX, ADDRESS_DETAIL_PID, FLAT_NUMBER,
                    NUMBER_FIRST, NUMBER_LAST, STREET_LOCALITY_PID, LOCALITY_PID, POSTCODE,
-                   CONFIDENCE, 
+                   CONFIDENCE,
                    ALIAS_PRINCIPAL, PRIMARY_SECONDARY),
             by = c("GNAFPID" = "ADDRESS_DETAIL_PID")) %>%
   mutate(FINAL_NUM = ifelse(!is.na(NUMBER_LAST), paste0(NUMBER_FIRST, "-", NUMBER_LAST),
@@ -367,7 +407,7 @@ ABR_GNAF <- select(ABR_Dynamic, PID, GNAFPID) %>%
                                    NUMBER_FIRST))) %>%
   left_join(select(GNAF_StreetLocal, STREET_LOCALITY_PID, STREET_NAME, STREET_TYPE_CODE),
             by = c("STREET_LOCALITY_PID")) %>%
-  mutate(GNAF = paste(FINAL_NUM, STREET_NAME, STREET_TYPE_CODE)) %>% 
+  mutate(GNAF = paste(FINAL_NUM, STREET_NAME, STREET_TYPE_CODE)) %>%
   left_join(select(GNAF_Local, LOCALITY_PID, LOCALITY_NAME),
             by = c("LOCALITY_PID")) %>%
   select(PID:Clean, LEVEL_NUMBER_PREFIX, GNAF, LOCALITY_NAME, POSTCODE, CONFIDENCE, ALIAS_PRINCIPAL, PRIMARY_SECONDARY) %>%
@@ -381,7 +421,7 @@ ABR_Level <- ABR_Attributes_AL1_Pf %>%
 ABR_GNAF[ABR_GNAF ==""] <- NA
 
 match <- function(x) {
-  y <- strsplit(x, " ") 
+  y <- strsplit(x, " ")
   if(length(y) > 0) {any(sapply(y, '%in%', unname(ABR_Level$t1)))
   }
   else {
@@ -393,7 +433,7 @@ ABR_GNAF[] <- lapply(ABR_GNAF, as.character)
 ABR_GNAF$ADD1 = sapply(ABR_GNAF$AddressLine1, match)
 ABR_GNAF$ADD2 = sapply(ABR_GNAF$AddressLine2, match)
 
-# Other Processes: 
+# Other Processes:
 convert <- function(date) {
   result = as.POSIXct(strptime(date, format = "%Y%m%d"))
   return(result)
@@ -406,7 +446,7 @@ ABR_Name <- sqlQuery(CWW_DW, "SELECT [PID]
                      ,[ABNCanDOE]
                      ,[MainTradingName]
                      FROM [CWW_DW].[dbo].[ABR_Agency_Data_20160315]",
-                     stringsAsFactors = FALSE) %>% 
+                     stringsAsFactors = FALSE) %>%
             subset.data.frame(PID %in% ABR_Dynamic$PID) %>%
             mutate(ABNRegDOE = convert(ABNRegDOE),
                    ABNCanDOE = convert(ABNCanDOE)) %>%
@@ -422,7 +462,7 @@ ABR_Name <- sqlQuery(CWW_DW, "SELECT [PID]
 
 # Test scenario 1: Multiples in ABR (test beta - not functional - further develop for dynamic)
 Match_multiples <- read.csv('G:/Business and Environmental Services/Business Customer Programs/Customers/Master Lists/Significant Water Users for Quarterly Reporting/Q1 2016-17/Match/261016_GNAFANZSIC2.csv',
-                            sep = ",", 
+                            sep = ",",
                             stringsAsFactors=FALSE) %>%
   filter(!is.na(LocationIndustryClass)) %>%
   select(MASTERID, GNAFPID, LocationIndustryClass) %>%
@@ -430,7 +470,7 @@ Match_multiples <- read.csv('G:/Business and Environmental Services/Business Cus
          C2 = substr(LocationIndustryClass, 1,2),
          C3 = substr(LocationIndustryClass, 1,3)) %>%
   group_by(GNAFPID, MASTERID) %>%
-  summarise(sample_n = n(), 
+  summarise(sample_n = n(),
             Class1 = paste0("",unlist(list(as.character(unique(C1)))), collapse = "; "),
             Class2 = paste0("",unlist(list(as.character(unique(C2)))), collapse = "; "),
             Class3 = paste0("",unlist(list(as.character(unique(C3)))), collapse = "; ")) %>%
@@ -439,7 +479,7 @@ Match_multiples <- read.csv('G:/Business and Environmental Services/Business Cus
          Class3_n = sapply(str_split(Class3, "; "), length)) %>%
   select(-Class3)
 
-# Test scenario 2: 
+# Test scenario 2:
 
 
 #
@@ -448,13 +488,13 @@ Match_multiples <- read.csv('G:/Business and Environmental Services/Business Cus
 # Source 3: VICMaps: Land Use Codes ####
 #
 # Source 4: Sensis Purchase ####
-Sensis <- sqlQuery(CWW_DW, 
+Sensis <- sqlQuery(CWW_DW,
                    "SELECT DISTINCT [ID]
 			             ,[anzsic]
                    ,[anzsic_desc]
                    ,[yellow]
                    ,[F18]
-                   FROM [CWW_DW].[dbo].[NONRESMETERS_ANZSIC_CODES_Matched]", 
+                   FROM [CWW_DW].[dbo].[NONRESMETERS_ANZSIC_CODES_Matched]",
                    stringsAsFactors = FALSE) %>%
   mutate(MASTERID = as.numeric(substring(ID, 3, 9)),
          ANZSICSENSIS = anzsic)
@@ -468,17 +508,17 @@ ABR_ANZSIC <- select(ABR_Full, LocationIndustryClass, LocationIndustryClassDescr
             Count = n()) %>%
   left_join(select(Map_IndustryEndUse, ANZSIC, Guardian_description, Sector, Industry, Water_connect_status, EU_BlockWater),
             by = c("LocationIndustryClass" ="ANZSIC"))
-write.table(ABR_ANZSIC_Bar, "22092016_ABR_ANZSIC_bar.csv", sep = ",", row.names = FALSE)  
+write.table(ABR_ANZSIC_Bar, "22092016_ABR_ANZSIC_bar.csv", sep = ",", row.names = FALSE)
 
 # Appendix 1b: Subset List of barred customers
 ABR_ANZSIC_Bar <- ABR_ANZSIC %>%
   filter(Count > 10000) %>%
   rbind(ABR_ANZSIC[c(505,506,507), ])
 ABR_ANZSIC_Bar <- ABR_ANZSIC_Bar[-c(4), ]
-write.table(ABR_ANZSIC, "13072016_ABR_ANZSIC.csv", sep = ",", row.names = FALSE)  
+write.table(ABR_ANZSIC, "13072016_ABR_ANZSIC.csv", sep = ",", row.names = FALSE)
 
 # Appendix 1c: Revised real-time subset list of barred customers (combining another list of service and activity industry codes)
-ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_ANZSIC_bar.csv", 
+ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_ANZSIC_bar.csv",
                            stringsAsFactors = FALSE) %>%
   left_join(select(ABR_Full, LocationIndustryClass, LocationIndustryClassDescription),
             by = c("LocationIndustryClass")) %>%
@@ -487,7 +527,7 @@ ABR_ANZSIC_Bar <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/22092016_ABR_
             Count = n()) %>%
   left_join(select(Map_IndustryEndUse, ANZSIC, Guardian_description, Sector, Industry, Water_connect_status, EU_BlockWater),
             by = c("LocationIndustryClass" ="ANZSIC"))
-  
+
 # Appendix 2: First glance at data. This clipping method is no longer used, the method had been refined, below now superceded.
 # 2a) CWW Prop location clippings for crude first-cut filtering
 QCLIP_CATCHMENT <- sqlQuery(CWW_DW, "SELECT DISTINCT [LOCA_SUBURB]
@@ -532,7 +572,7 @@ ABR_Filter <- sqlQuery(CWW_DW, "SELECT [PID]
          Suburb = sapply(Suburb, toupper)) %>%
   subset.data.frame(Suburb %in% QCLIP_CATCHMENT$LOCA_SUBURB|
                       Postcode %in% QCLIP_CATCHMENT$LOCA_POSTCODE)
-rm(ABR_Filter) 
+rm(ABR_Filter)
 
 # Appendix 3: Before snapshot of industries
 ABR_Before <- sqlQuery(CWW_DW, "SELECT [PID]
@@ -563,12 +603,12 @@ ABR_Before <- sqlQuery(CWW_DW, "SELECT [PID]
          !is.na(Longitude),
          Longitude != "0")
 
-ABR_BDSP2 <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Before$Longitude, 
+ABR_BDSP2 <- SpatialPointsDataFrame(coords = data.frame(x = ABR_Before$Longitude,
                                                        y = ABR_Before$Latitude,
                                                        stringsAsFactors = FALSE),
                                    data=data.frame(PID = ABR_Before$PID),
                                    proj4string= CRS("+proj=longlat +datum=WGS84")) %>%
-  spTransform(CRS(proj4string(CWWBoundary))) 
+  spTransform(CRS(proj4string(CWWBoundary)))
 
 ABR_BWithin <- ABR_BDSP2@data[which(gContains(CWWBoundary, ABR_BDSP2, byid = TRUE)), ]
 
@@ -576,7 +616,7 @@ ABR_Baseline <- ABR_Before %>%
   subset.data.frame(PID %in% ABR_BWithin) %>%
   mutate(LocationStartDate = ifelse(is.na(LocationStartDate),
                                     NA,
-                                    paste0(substring(LocationStartDate, 1,4), "-", 
+                                    paste0(substring(LocationStartDate, 1,4), "-",
                                            substring(LocationStartDate, 5,6),"-",substring(LocationStartDate, 7,8))),
          LocationStartDate = as.Date(LocationStartDate)) %>%
   subset.data.frame(!LocationIndustryClass %in% ABR_ANZSIC_Bar$LocationIndustryClass) %>%
@@ -604,7 +644,7 @@ ABR_Test <- data.frame(lapply(ABR_Dynamic, function(v) {
          t3 = word(AddressLine2, 1),
          t4 = word(AddressLine2, -1))
 
-ABR_Test1 <- select(ABR_Test, AddressLine1, t1, t2) %>% 
+ABR_Test1 <- select(ABR_Test, AddressLine1, t1, t2) %>%
   mutate(t3 = sapply(str_split(AddressLine1, " "), length),
          t4 = grepl("[0-9]", AddressLine1, TRUE),
          t5 = regexpr("[0-9]", AddressLine1),
@@ -617,7 +657,7 @@ ABR_Test1 <- select(ABR_Test, AddressLine1, t1, t2) %>%
 ABR_Test1_define <- ABR_Test1 %>%
   filter(t4 == TRUE) %>%
   filter(t5>1) %>%
-  filter(t3 == "2") %>% select(t1) %>% 
+  filter(t3 == "2") %>% select(t1) %>%
   mutate(t1 = str_extract_all(t1, "[a-zA-Z]"),
          t1 = sapply(t1, paste, collapse=''),
          t1 = gsub("\\'", "", t1)) %>%
@@ -634,7 +674,7 @@ ABR_Test2_define <- data.frame(lapply(ABR_Dynamic, function(v) {
          t5 = regexpr("[0-9]", AddressLine1)) %>%
   filter(t5 != "-1" & t3 != "1") %>%
   mutate(t8 = str_extract_all(t2, "[a-zA-Z]"),
-         t8 = sapply(t8, paste, collapse='')) %>% 
+         t8 = sapply(t8, paste, collapse='')) %>%
   distinct()
 
 ABR_Test2a_define <- select(ABR_Test2_define, t3, t5, t8) %>%
@@ -643,11 +683,11 @@ ABR_Test2a_define <- select(ABR_Test2_define, t3, t5, t8) %>%
 write.table(ABR_Test2a_define, "09262016_ABR_Test2a_define.csv", sep = ",", row.names = FALSE)
 
 
-# b) Execution of test scenerio for migration 
-ABR_Attributes_AL1_Pf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test1_define.csv", 
-                                  stringsAsFactors = FALSE) 
-ABR_Attributes_AL1_Sf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test2b_define.csv", 
-                                  stringsAsFactors = FALSE) 
+# b) Execution of test scenerio for migration
+ABR_Attributes_AL1_Pf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test1_define.csv",
+                                  stringsAsFactors = FALSE)
+ABR_Attributes_AL1_Sf <- read.csv("N:/ABR/Output 1 Dynamic Model/Realtime/PP09262016_ABR_Test2b_define.csv",
+                                  stringsAsFactors = FALSE)
 
 ABR_Select <- select(ABR_Dynamic, PID, AddressLine1, AddressLine2:Postcode)
 ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
@@ -684,12 +724,12 @@ ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
          n3 = ifelse(n3==n1,NA, n3)) %>%
   mutate(F6 = paste0(n1,"/",n2),
          F6 = ifelse(is.na(n1), n2,
-                     ifelse(is.na(n2), 
-                            n1, 
+                     ifelse(is.na(n2),
+                            n1,
                             F6)),
          F7 = ifelse(is.na(t7), F6,
-                     ifelse(is.na(F6)|F6=="[0-9]", 
-                            t7, 
+                     ifelse(is.na(F6)|F6=="[0-9]",
+                            t7,
                             t7)),
          F1 = str_split(AddressLine1, "[0-9]"),
          F1 = sapply(F1, unlist),
@@ -697,8 +737,8 @@ ABR_Address <- data.frame(lapply(ABR_Select,captable)) %>%
          F11 = gsub("\\s*\\w*$", "" , F1),
          Clean = ifelse((t3 ==3&t5 ==1&(SAttribute4=="STREET"|SAttribute4=="AREA")),
                         (paste(t1,t9,SAttribute3)),
-                        ifelse(t5 != -1&t3!=3&t5!=1&SAttribute4=="STREET"|SAttribute4=="AREA", 
-                               paste(F7, F11, SAttribute3), 
+                        ifelse(t5 != -1&t3!=3&t5!=1&SAttribute4=="STREET"|SAttribute4=="AREA",
+                               paste(F7, F11, SAttribute3),
                                NA)))
 
 # Appendix 5: Creating a Package, Addressr
@@ -709,7 +749,7 @@ library(roxygen2)
 create("Addressr")
 
 # Create folder called manual and
-# re-set the working directory to your package folder 
+# re-set the working directory to your package folder
 setwd("./addressr")
 
 # Use roxygen2 to auto document your package
@@ -730,7 +770,7 @@ levelr <- function(x) {
     mutate(t1 = gsub("/ ", "/", t1),
            t1 = word(as.character(AddressLine1), 1)) %>%
     left_join(ABR_Attributes_AL1_Pf,
-              by = c("t1")) 
+              by = c("t1"))
   return(extract)
 }
 
