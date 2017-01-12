@@ -90,7 +90,3 @@ vignettes/*.pdf
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-#incomplete R scripts#
-######################
-Addressr.R
