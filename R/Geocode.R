@@ -13,7 +13,7 @@
 #' Geocode()
 #'
 
-Geocode <- function(x, y, id, FULL_ADDRESS, radius, convert = TRUE) {
+Geocode <- function(x, y, id, FULL_ADDRESS, radius, fuzzy = FALSE, convert = TRUE) {
 
   if(!require(sp)) {
     message("installing the 'sp' package")
@@ -64,7 +64,7 @@ Geocode <- function(x, y, id, FULL_ADDRESS, radius, convert = TRUE) {
 
   if(missing(x) & missing(y)) {
 
-    GNAF <- lapply(Query, function(x) GNAFAPI::Request(x))
+    GNAF <- lapply(Query, function(x) GNAFAPI::Request(x, fuzzy = fuzzy))
 
   }
 

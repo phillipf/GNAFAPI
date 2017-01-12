@@ -23,8 +23,9 @@ Request <- function(Address, boundingbox, fuzzy = FALSE) {
                  numHits = 1,
                  fuzzy =
                  list(maxEdits = 2,
-                 minLength = 5,
-                 prefixLength = 2)
+                 minLength = 4,
+                 prefixLength = 0
+                 )
                  )
   }
 
@@ -40,8 +41,9 @@ Request <- function(Address, boundingbox, fuzzy = FALSE) {
                  numHits = 1,
                  fuzzy =
                  list(maxEdits = 2,
-                 minLength = 5,
-                 prefixLength = 2),
+                 minLength = 4,
+                 prefixLength = 0
+                 ),
                  box = boundingbox
                 )
   }
