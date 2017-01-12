@@ -29,6 +29,26 @@ Geocode <- function(x, y, id, FULL_ADDRESS, radius, fuzzy = FALSE, convert = TRU
     message("installing the 'rgdal' package")
     install.packages("rgdal")
   }
+  
+  if(!require(modeltools)) {
+    message("installing the 'modeltools' package")
+    install.packages("modeltools")
+  }
+  
+  if(!require(mvtnorm)) {
+    message("installing the 'mvtnorm' package")
+    install.packages("mvtnorm")
+  }
+  
+  if(!require(multcomp)) {
+    message("installing the 'multcomp' package")
+    install.packages("multcomp")
+  }
+  
+  if(!require(DEoptimR)) {
+    message("installing the 'DEoptimR' package")
+    install.packages("DEoptimR")
+  }
 
   if(!require(shotGroups)) {
 
@@ -36,7 +56,7 @@ Geocode <- function(x, y, id, FULL_ADDRESS, radius, fuzzy = FALSE, convert = TRU
       message("installing the 'devtools' package")
       install.packages("devtools")
     }
-
+    
     message("installing the 'shotGroups' package")
     packageurl <- "https://cran.r-project.org/bin/windows/contrib/3.3/CompQuadForm_1.4.2.zip"
     install.packages(packageurl, repos=NULL, type="source")
