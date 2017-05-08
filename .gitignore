@@ -1,6 +1,7 @@
 .Rproj.user
 .Rhistory
 .RData
+
 # Logs and databases #
 ######################
 *.log
@@ -9,6 +10,11 @@
 *.csv
 *.xls
 *.xlsx
+
+# Java #
+######################
+JAVA_HOME.txt
+
 # OS generated files #
 ######################
 .DS_Store
@@ -18,6 +24,14 @@
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# spatial #
+######################
+
+*.dbf
+*.shp
+*.shx
+*.prj
 
 # History files
 .Rhistory
