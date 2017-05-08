@@ -27,7 +27,6 @@ Thumbs.db
 
 # spatial #
 ######################
-
 *.dbf
 *.shp
 *.shx
