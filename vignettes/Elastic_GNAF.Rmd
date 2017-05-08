@@ -1,0 +1,661 @@
+---
+title: "Elastic_GNAF"
+output: html_document
+---
+
+```{r setup}
+
+packages <- c("dplyr", "tidyr", "ggplot2", "maptools", "rgdal", "rgeos", "plyr", "curl", "RODBC")
+
+p <- installed.packages()
+ 
+ifelse(length(packages[!(packages %in% row.names(p))]) > 0,
+install.packages(pkgs = packages[!(packages %in% row.names(p))], repos = "https://cran.ms.unimelb.edu.au/"), print("OK"))
+
+
+
+library(devtools)
+
+ifelse(!("elasticdsl" %in% row.names(p)), devtools::install_github("ropensci/elasticdsl"), TRUE)
+
+ifelse(!("elastic" %in% row.names(p)), install_github('ropensci/elastic'), TRUE)
+
+#library(Enquiries)
+#library(ABR)
+library(elasticdsl)
+library(elastic)
+
+lapply(packages, require, character.only = TRUE)
+
+```
+
+```{r Read in data, include=FALSE}
+GNAFVerif <- read.csv('N:/ABR/Output 1 Dynamic Model/GNAF/Nov2016_GNAFAddress.txt',
+                      sep = ",",
+                      stringsAsFactors = FALSE)
+
+# b) Update of Alias Preferences
+GNAFALIAS <- read.csv('N:/ABR/GNAF_LocationAddress/NOV16_GNAF+EULA_PipeSeparatedValue/G-NAF/G-NAF NOVEMBER 2016/Standard/VIC_ADDRESS_ALIAS_psv.psv',
+                      sep = "|",
+                      stringsAsFactors = FALSE)
+
+# Source Input 2: CWW Boundary ####
+CWWBoundary <- readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp",
+                       layer="CWW Boundary_2014_region")
+
+
+# Processing of Data: ####
+GNAFVerif$row = 1:nrow(GNAFVerif)
+
+ABR_DSP1 <- SpatialPointsDataFrame(coords = data.frame(x = GNAFVerif$LONGITUDE,
+                                                             y = GNAFVerif$LATITUDE,
+                                                             stringsAsFactors = FALSE),
+                                         data=data.frame(PID = GNAFVerif$row),
+                                         proj4string= CRS("+proj=longlat +datum=WGS84")) %>%
+  spTransform(CRS(proj4string(CWWBoundary)))
+
+
+GNAFVerif_Boundary <- GNAFVerif[which(gContains(CWWBoundary, ABR_DSP1, byid = TRUE)), ]
+rm(GNAFVerif)
+
+GNAF_Summarised <- GNAFVerif_Boundary %>%
+  mutate(FINAL_LEVEL = ifelse(!is.na(LEVEL_NUMBER)&LEVEL_NUMBER_SUFFIX != "",
+                              paste0(LEVEL_TYPE," ", LEVEL_NUMBER, LEVEL_NUMBER_SUFFIX),
+                              ifelse(!is.na(LEVEL_NUMBER)&LEVEL_NUMBER_SUFFIX == "",
+                                     paste0(LEVEL_TYPE, " ", LEVEL_NUMBER),
+                                     ifelse(is.na(LEVEL_NUMBER)&!is.na(LEVEL_NUMBER_SUFFIX),
+                                            paste0(LEVEL_TYPE, " ", LEVEL_NUMBER_SUFFIX),
+                                            LEVEL_TYPE))),
+         FINAL_FLAT = ifelse(!is.na(FLAT_NUMBER)&!is.na(FLAT_NUMBER_SUFFIX),
+                             paste0(FLAT_NUMBER, FLAT_NUMBER_SUFFIX),
+                             ifelse(!is.na(FLAT_NUMBER)&is.na(FLAT_NUMBER_SUFFIX),
+                                    FLAT_NUMBER,
+                                    ifelse(is.na(FLAT_NUMBER)&!is.na(FLAT_NUMBER_SUFFIX),
+                                           FLAT_NUMBER_SUFFIX,
+                                           NA))),
+         FINAL_HOUSE_NUMBER =  ifelse(!is.na(NUMBER_LAST),
+                                      paste0(NUMBER_FIRST, "-", NUMBER_LAST),
+                                      NUMBER_FIRST),
+         FINAL_HOUSE_NUMBER = ifelse(NUMBER_FIRST_SUFFIX != "",
+                                     paste0(FINAL_HOUSE_NUMBER, NUMBER_FIRST_SUFFIX),
+                                     FINAL_HOUSE_NUMBER),
+         FINAL_HOUSE_NUMBER = ifelse(NUMBER_FIRST_PREFIX != "",
+                                     paste0(NUMBER_FIRST_PREFIX, FINAL_HOUSE_NUMBER),
+                                     FINAL_HOUSE_NUMBER),
+         FINAL_HOUSE_NUMBER = ifelse(NUMBER_LAST_SUFFIX != "",
+                                     paste0(FINAL_HOUSE_NUMBER, NUMBER_LAST_SUFFIX),
+                                     FINAL_HOUSE_NUMBER),
+         FINAL_HOUSE_NUMBER = ifelse(!is.na(LOT_NUMBER),
+                                     paste("LOT", LOT_NUMBER),
+                                     FINAL_HOUSE_NUMBER),
+         STREET_STRING = paste(STREET_NAME, STREET_TYPE_CODE),
+         STREETDIRECTIONAL = ifelse(STREET_SUFFIX_TYPE != "",
+                                    paste(STREET_STRING, STREET_SUFFIX_TYPE),
+                                    STREET_STRING)) %>%
+  mutate(Descriptor = ifelse(FINAL_FLAT == ""&FINAL_LEVEL == " "&FINAL_HOUSE_NUMBER != "",
+                             "PROPERTY",
+                             "TENANT"),
+         Descriptor = ifelse(Descriptor == "PROPERTY"&!is.na(LOT_NUMBER),
+                             "LOT",
+                             Descriptor)) %>%
+  mutate(H_Order = ifelse(Descriptor == "PROPERTY"|Descriptor == "LOT",
+                          "BASE",
+                          ifelse((Descriptor == "TENANT")&FINAL_LEVEL == " ",
+                                 "UNIT",
+                                 "LEVEL")),
+         H_Order = ifelse(H_Order == "LEVEL"&FINAL_FLAT == "",
+                          "LEVEL_ONLY",
+                          H_Order))
+
+```
+
+```{r Clip}
+
+CWW_DW <- odbcDriverConnect(connection="Driver={SQL Server};
+                            server=wvdb1devsql;
+                            database=ABR;
+                            trusted_connection=true")
+
+# Gentrack Reconcilation - Latest Updates - Supporting
+GNAF <- sqlQuery(CWW_DW,
+                      "SELECT  
+                       [ADDRESS_DETAIL_PID]
+                      ,[LATITUDE]
+                      ,[LONGITUDE]
+                       FROM [ABR].[dbo].[ADDRESS_VIEW]", 
+                 stringsAsFactors = FALSE)
+
+CWWBoundary <- readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp",
+                       layer="CWW Boundary_2014_region")
+
+GNAF_sp <- SpatialPointsDataFrame(coords = data.frame(x = GNAF$LONGITUDE,
+                                                             y = GNAF$LATITUDE,
+                                                             stringsAsFactors = FALSE),
+                                         data=data.frame(ADDRESS_DETAIL_PID = GNAF$ADDRESS_DETAIL_PID),
+                                         proj4string= CRS("+proj=longlat +datum=WGS84")) %>%
+            spTransform(CRS(proj4string(CWWBoundary)))
+
+
+GNAF_CWW <- GNAF_sp[which(gContains(CWWBoundary, GNAF_sp, byid = TRUE)), ]
+
+GNAF_clip <- as.data.frame(cbind(GNAF_CWW@data,
+                   GNAF_CWW@coords))
+
+sqlSave(CWW_DW, GNAF_clip, rownames = FALSE, colnames = FALSE, verbose = FALSE,
+        safer = TRUE, addPK = FALSE, 
+        fast = TRUE, test = FALSE, nastring = NULL)
+
+```
+
+```{r index}
+
+write.csv(GNAFVerif_Boundary[1:5,], "C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv")
+
+example <- read.csv("C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv", stringsAsFactors = FALSE)
+
+system("C:/Users/farrelp1/Documents/elasticsearch-5.2.1/elasticsearch-5.2.1/bin/elasticsearch.bat")
+
+elastic::connect(es_base="http://127.0.0.1", es_port="9200") 
+
+elastic::connection()
+# elastic("http://localhost:9200", "test", "data") %index% GNAFVerif_Boundary[1:5,]
+# elastic::doc
+
+test <- GNAFVerif_Boundary %>% sample_n(10) %>% select(NUMBER_FIRST, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME, POSTCODE)
+#write.csv(test, "C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv")
+
+elastic::index_delete("test")
+
+res <- docs_bulk_prep(test, index = "test", path = "C:/Users/farrelp1/Documents/GNAFAPI/data/test.json")
+
+#docs_bulk(res, index = "test")
+
+docs_bulk(res, index = "test", type = "line")
+
+Search("test")$hits
+
+elasticdsl::prefix_()
+
+# index("test") %>%
+#    #bool_(must_not = list(speaker="KING HENRY IV")) %>%
+#    range(NUMBER_FIRST == 4) %>%
+#    Search()
+
+body <- list(query=list(#range=list(NUMBER_FIRST=list(gte=1, lte=20)),
+                        fuzzy=list(LOCALITY_NAME=list(value = "COLLING", fuzziness=8))))
+
+Search('test', body=body)$hits$total
+
+
+index("test") %>% 
+  #elasticdsl::filter() %>%
+  elasticdsl::prefix_(LOCALITY_NAME = "taylors") %>%
+  Search()
+  
+
+# docs_bulk(test, index = "test"#, "C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv")
+# )
+
+#docs_bulk("C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv", index = "test"#, "C:/Users/farrelp1/Documents/GNAFAPI/data/GNAFVerif_Boundary.csv")
+#)
+#docs_bulk(as.list(as.data.frame(t(GNAFVerif_Boundary[1:5,]))))
+
+index(as.list(as.data.frame(t(GNAFVerif_Boundary[1:5,])))) 
+#xy.list <- setNames(split(GNAFVerif_Boundary[1:5,], seq(nrow(GNAFVerif_Boundary[1:5,]))), rownames(GNAFVerif_Boundary[1:5,]))
+as.list(as.data.frame(t(GNAFVerif_Boundary[1:5,])))
+
+
+```
+
+```{r attempt a straight connection to the GNAF server}
+#doesn't seem to function properly
+
+connect(es_base="http://127.0.0.1", es_port=9040)
+
+body <- list(query=list(#range=list(NUMBER_FIRST=list(gte=1, lte=20)),
+                        fuzzy=list(LOCALITY_NAME=list(value = "COLLING", fuzziness=8))))
+
+body <- list(query = list(addr = "25 collins",
+                 numHits = 50
+                 ))
+
+body <- list(query = list(addr = list(value="25 collins")))
+
+Search('search', body=body)$hits$total
+
+Search('search')$hits$total
+
+
+
+```
+
+```{r grab top 50, include=FALSE}
+
+library(httr)
+
+body <- list(addr = "25-27 collins",
+                 numHits = 50
+                 )
+
+req <- httr::POST("http://localhost:9040/search",
+              body = body, encode = "json")
+
+response <- content(req)
+
+#GNAFAPI::Process(req)
+
+```
+
+```{r insert addresses.gz into an elastic search server}
+library(rjson)
+library(ndjson)
+#res <- docs_bulk_prep(test, index = "addresses", path = "N:/ABR/GNAF_LocationAddress/addresses - Copy/addresses - Copy - Copy.json")
+
+#docs_bulk(res, index = "test")
+
+#addresses <- system.file("addresses - Copy - Copy", "N:/ABR/GNAF_LocationAddress/addresses - Copy/addresses - Copy - Copy.json")
+#json_data <- rjson::fromJSON(file="N:/ABR/GNAF_LocationAddress/addresses - Copy/addresses - Copy - Copy.json")
+
+#d = jsonlite::fromJSON(readLines("N:/ABR/GNAF_LocationAddress/addresses - Copy/addresses - Copy - Copy.json"), flatten = TRUE)$dokumentstatus
+
+addresses <- ndjson::stream_in("N:/ABR/GNAF_LocationAddress/addresses - Copy.gz")
+
+dplyr::glimpse(addresses)
+
+#res <- docs_bulk_prep(addresses, index = "addresses", path = "N:/ABR/GNAF_LocationAddress/addresses.json")
+
+
+
+#docs_bulk(res, index = "addresses")
+
+for(i in seq_along(res)) {
+docs_bulk(res[i], index = "addresses")
+}
+# 
+# f = list.files("N:/ABR/GNAF_LocationAddress/", pattern = "json$", full.names = TRUE)
+# 
+# for(j in f) {
+# 
+#   d = fromJSON(j, flatten = TRUE)$dokumentstatus
+# 
+#   cat("addressDetailPid:", d$dokument$addressDetailPid, "street.typeName:", d$dokument$street.typeName, "\n")
+# 
+# }
+
+Search(index='addresses')$hits$total
+
+# body <- list(query=list(range=list(numberLast.number=list(gte=1, lte=5),
+#                                    numberFirst.number=list(gte=1, lte=5))
+#                         ))
+                        #fuzzy=list(localityName=list(value = "GLADSTONE PARK", fuzziness=5))))
+body <- list(query=list(range=list(numberLast.number=list(gte=1, lte=5))))  
+Search('addresses', body=body)$hits$hits[[1]]
+
+fuzzy <- list(query = list(fuzzy = list(street.name = list(value = "LATROBE", fuzziness = 20))))
+Search(index="addresses", body=fuzzy)$hits$total
+
+fuzzy <- list(bool = list(should = list(street.name = list(query = "LATROBE"))))
+Search(index="addresses", body=fuzzy)$hits$total
+
+bool <- '{
+  "query": {
+
+    "bool": {
+      "should": [
+        { "match": { 
+            "aliasPrincipal":  {
+              "query": "P",
+              "boost": 2
+        }}},
+        { "match": { 
+            "primarySecondary":  {
+              "query": "P",
+              "boost": 2
+        }}},
+        { "bool":  { 
+            "should": [
+              { "match": { "stateAbbreviation": "VIC" }},
+              { "match": { "numberLast.number": 30 }},
+              { "match": { "numberFirst.number": 28 }}
+            ]
+        }}
+      ]
+    }
+
+}
+}'
+
+Search('addresses', body=bool)$hits$hits[[2]]
+
+
+func <- '"function_score": {
+          "script_score": {
+            "script": {
+            "lang": "painless",
+            "params": {
+                "param1": 28
+            },
+            "inline": "_score * doc[\'numberFirst.number\'].value - param1"
+    }
+}
+  }'
+
+func <- '{"query": {"function_score": {
+          "query": {"bool": { "should": [
+                      { "match": 
+                          { "aliasPrincipal":  {
+                            "query": "P",
+                            "boost": 2}}}]}},
+          "script_score" : {
+              "script" : {
+                "lang": "painless",
+                "params": {
+                  "numberFirst": 28
+                  },
+                "inline": "_score * doc[\'numberFirst.number\'].value"
+              }
+          }
+        }
+}
+}'
+    
+Search('addresses', body=func)$hits$hits[[2]]
+
+func2 <- '{"query": {"function_score": {
+          "query": {"bool": { "should": [
+                      { "match": 
+                          { "aliasPrincipal":  {
+                            "query": "P",
+                            "boost": 2}}}]}},
+"script_score": {
+
+          "params": { 
+            "First": 2,
+            "Last": 10
+          },
+          "inline": "numFirst = doc[\'numberFirst.number\'].value; numLast = doc[\'numberLast.number\'].value;
+          if (First < numFirst) { return numFirst - First };
+          return numFirst - First;" 
+        }
+        }
+}
+}'
+    
+Search('addresses', body=func2)$hits$hits[[2]]
+
+func3 <- '{"query": {
+  "function_score": {
+              "query": {"bool": { "should": [
+                      { "match": 
+                          { "aliasPrincipal":  {
+                            "query": "P",
+                            "boost": 2}}}]}},
+    "functions": [
+      {
+        "script_score": {
+          "script": {
+          "lang": "groovy",
+          "file": "func",
+          "params": { 
+            "First": 2
+          }
+
+        }
+        }
+}
+    ]
+  }
+}}'
+
+
+
+func4  <- '{"query": {"bool": { "should": [
+                      { "match": 
+                          { "aliasPrincipal":  {
+                            "query": "P",
+                            "boost": 2}}}]}},
+  "script_fields": {
+    "my_field": {
+      "script": {
+        "file": "my_script",
+        "params": {
+          "my_var": 2
+        }
+      }
+    }
+  }
+}'
+
+
+Search('addresses', body=func4)$hits$hits[[2]]
+
+func5 <- '{
+  "query": {
+    "function_score": {
+      "query": {"bool": { "should": [
+                      { "match": 
+                          { "aliasPrincipal":  {
+                            "query": "P",
+                            "boost": 2}}}]}},
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "lang": "groovy",
+              "file": "func2",
+              "params": {
+                "First": 20
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}'
+
+Search('addresses', body=func5)$hits$hits[[2]]
+
+func5 <- '{
+  "query": {
+    "function_score": {
+      "query": {
+        "match": {
+          
+          "localityName": "MOUNT MARTHA"
+        }
+      },
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "lang": "groovy",
+              "file": "func2",
+              "params": {
+                "First": 3
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}'
+
+Search('addresses', body=func5)$hits$hits[[1]]
+
+
+add <- '{
+  "query": {
+    "multi_match": {
+      "query":       "BAY STREET BRIGHTON 3186",
+      "type":        "most_fields",
+      "fields":      [ "street.name", "street.typeCode", "localityName", "postcode" ]
+    }
+  }
+}'
+
+Search('addresses', body=add)$hits$hits[[1]]
+
+func6 <- '{
+  "query": {
+    "function_score": {
+      "query": {
+          "multi_match": {
+            "query":       "BAY STREET BRIGHTON 3186",
+            "type":        "most_fields",
+            "fields":      [ "street.name", "street.typeCode", "localityName", "postcode" ]
+          }
+        },
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "lang": "groovy",
+              "file": "fun2",
+              "params": {
+                "First": 10
+              }
+            }
+          }
+        }
+      ],
+    "score_mode": "max"
+    }
+  }
+}'
+
+Search('addresses', body=func6)$hits$hits[[1]]
+
+test <- index("addresses") %>%
+  #filter() %>% 
+  prefix_(street.name = "LATROBE") %>%
+  size(2) %>% 
+  fields(numberLast.number, numberFirst.number)
+ 
+  #exec() %>% 
+  #n()
+
+test$hits$hits[[1]]$`_source`
+
+GNAFAPI::Process(test)
+
+response2 <- test$hits$hits
+
+df <- data.frame(response2[[1]])
+
+df <- ldply(response2, function(x) data.frame(x,
+                              stringsAsFactors=FALSE))
+
+result <- data.frame(lapply(unlist(response2), type.convert),
+                              stringsAsFactors=FALSE)
+
+
+    result = cbind(data.frame(lapply(unlist(response2), type.convert),
+                              stringsAsFactors=FALSE),
+                   d61Address = response3$d61Address[[1]],
+                   d61AddressNoAlias = response3$d61AddressNoAlias,
+                   score = response3$score)
+
+index("geoshape") %>%
+  geoshape(field = "location", type = "envelope", coordinates = list(c(-30, 50), c(30, 0))) %>% 
+  n()
+
+# json <- '{"index":{"_index":"addresses","_type":"addresses"}}{"addressDetailPid":"GAVIC420265644","aliasPrincipal":"P","localityName":"KEVINGTON","location.lat":-37.3544,"location.lon":146.1423,"numberFirst.number":4360,"postcode":"3723","stateAbbreviation":"VIC","stateName":"VICTORIA","street.name":"MANSFIELD-WOODS POINT","street.typeCode":"ROAD","street.typeName":"RD"}'
+# 
+# json2 <- gsub('(\\{"index":\\{"_index":"addresses","_type":"addresses"\\}\\})(\\{.*\\})', "\\2", json)
+# 
+# addressJSON <- readLines(f[1]) 
+# addresses <- addressJSON[!grepl('(\\{"index":\\{"_index":"addresses","_type":"addresses"\\}\\})', addressJSON)]
+# 
+
+elastic::index_delete("addresses")
+# 
+# 
+# cat(addresses, index = "addresses")
+# 
+# 
+# 
+# d = fromJSON(json2)
+
+
+
+```
+
+```{r, eval=FALSE, include=FALSE}
+
+func7 <- '{
+  "query": {
+    "function_score": {
+      "query": {
+          "multi_match": {
+            "query":       "BAY STREET BRIGHTON 3186",
+            "type":        "most_fields",
+            "fields":      [ "street.name", "street.typeCode", "localityName", "postcode" ]
+          }
+        },
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "lang": "painless",
+              "inline": "int total = 0; total += doc[\'numberFirst.number\'].value/doc[\'numberFirst.number\'].value; return total;"
+            }
+          }
+        }
+      ]
+    }
+  }
+}'
+
+Search('addresses', body=func7)$hits$hits[[1]]
+
+func8 <- '{
+  "query": {
+    "function_score": {
+      "query": {
+          "multi_match": {
+            "query":       "BAY STREET BRIGHTON 3186",
+            "type":        "most_fields",
+            "fields":      [ "street.name", "street.typeCode", "localityName", "postcode" ]
+          }
+        },
+      "functions": [
+        {
+          "script_score": {
+            "script": {
+              "lang": "python",
+              "file": "pythonfun",
+              "params": {
+                "first": 10
+              }
+            }
+          }
+        }
+      ],
+      "score_mode": "sum",
+      "boost_mode": "replace"
+    }
+  }
+}' 
+
+Search('addresses', body=func8)$hits$hits[[1]]
+
+
+"query": {
+    "function_score": {
+      "functions": [
+        {
+          "script_score": {
+            "script": "_score * doc['numberOfWorks'].value / doc['averagePrice'].value"
+          }
+        }
+      ],
+      "score_mode": "sum",
+      "boost_mode": "replace"
+    }
+  }
+}'
+
+```
+

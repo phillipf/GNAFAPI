@@ -1,0 +1,13 @@
+C:\Program Files\ojdkbuild\java-1.8.0-openjdk-1.8.0.111-3\bin\java; 
+C:\Program Files\ojdkbuild\java-1.8.0-openjdk-1.8.0.111-3\jre\bin\java; 
+C:\Program Files (x86)\Java\jre1.8.0_45\bin\client; 
+C:\Program Files (x86)\Java\jre1.8.0_45\bin; 
+C:\Program Files (x86)\Java\jre1.8.0_45\bin\java;
+C:\Program Files (x86)\Java\jre1.8.0_45
+
+C:\Users\farrelp1\Documents\GDAL\bin; 
+C:\Program Files\ojdkbuild\java-1.8.0-openjdk-1.8.0.111-3\jre\bin\server;
+C:\Users\farrelp1\.babun; 
+C:\Users\farrelp1\Documents\bin\pgsql\bin;
+C:\Users\farrelp1\AppData\Local\Pandoc\; C:\Users\farrelp1\Documents\sbt;
+C:\Users\farrelp1\Documents\postgresql-9.5.5-1-windows-x64-binaries\pgsql\bin 

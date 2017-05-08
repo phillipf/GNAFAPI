@@ -1,0 +1,7 @@
+setup.py
+GNAF/__init__.py
+GNAF.egg-info/PKG-INFO
+GNAF.egg-info/SOURCES.txt
+GNAF.egg-info/dependency_links.txt
+GNAF.egg-info/requires.txt
+GNAF.egg-info/top_level.txt
