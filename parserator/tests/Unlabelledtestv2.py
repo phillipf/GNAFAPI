@@ -1,6 +1,7 @@
 from collections import defaultdict
 
 import GNAF
+import re
 import itertools
 import operator
 
@@ -8,12 +9,16 @@ import pandas as pd
 
 unlabelled = pd.read_csv("C:/Users/farrelp1/Documents/GNAFAPI/parserator/dataunlabeled_2017-04-21DHHS_CTAddress.csv", header=None)
 
+unlabelled = unlabelled[0].apply(lambda x: re.sub(r', Australia$', "", x))
+
+#unlabelled[unlabelled.apply(lambda x: x.endswith("Australia"))]
+
 def accumulate(l):
     it = itertools.groupby(l, operator.itemgetter(1))
     for key, subiter in it:
        yield key, ' '.join(item[0] for item in subiter)
 
-labelled = unlabelled[0].apply(lambda x: GNAF.parse(x))
+labelled = unlabelled.apply(lambda x: GNAF.parse(x))
 
 labelled = labelled.apply(lambda x: list(accumulate(x)))
 
