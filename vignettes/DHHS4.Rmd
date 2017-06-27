@@ -1,0 +1,1367 @@
+---
+title: "DHHS"
+author: "Phil Farrell"
+date: "11 May 2017"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(data.table)
+
+# library(devtools)
+# install_github("phillipf/AddressR")
+
+library(AddressR)
+library(RODBC)
+library(sp)
+library(stringdist)
+library(foreach)
+
+#library(DBI)
+#install.packages("RSQLServer")
+#Sys.setenv(JAVA_HOME='C:\\Users\\farrelp1\\Documents\\java-1.8.0-openjdk-1.8.0.111-3\\bin') # for 64-bit version
+#db <- dbConnect(RSQLServer::SQLServer(), server = "WVDB1DEVSQL", database = 'ABR')
+
+```
+
+```{r read in raw DHHS}
+
+CoolingTowers <- read.csv('N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/050117_DHHSCTSAreadetails.csv',
+                          stringsAsFactors=FALSE)
+
+CoolingTower_Sites <- data.frame(SITE = CoolingTowers$X.1[grepl("SITE", CoolingTowers$X.1)],
+                                 Geocode = CoolingTowers$X.1[grepl("Geocoded", CoolingTowers$X.1)]) %>%
+                      mutate(x = sapply(strsplit(sub("Geocoded: ", "", Geocode), "/"), "[", 1),
+                             coord = sapply(strsplit(sub("Geocoded: ", "", Geocode), "/"), "[", 2)) %>%
+                      transmute(SITE,
+                                LATITUDE = unname(x),
+                                LONGITUDE =  sapply(
+                                            sapply(coord, strsplit, '[(]'),
+                                            "[", 1),
+                                ACCURACY = sapply(sapply(coord, strsplit, '[(]'),
+                                                  "[", 2)) %>%
+                      mutate(ADDRESS_STRING = gsub("(SITE\\s*[0-9]+)\\s*-\\s*(.*)","\\2",SITE),
+                             SITE =  as.numeric(gsub("SITE\\s*([0-9]+)\\s*-\\s*(.*)","\\1",SITE)),
+                             ACCURACY = gsub("\\)$", "", ACCURACY))
+
+write.csv(CoolingTower_Sites, 
+          'N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_unlabelled_DHHS.csv', 
+          row.names = F)
+
+```
+
+```{r read in raw EMIS}
+
+paste3 <- function(...,sep=" ") {
+     L <- list(...)
+     L <- lapply(L,function(x) {x[is.na(x)] <- ""; x})
+     ret <-gsub(paste0("(^",sep,"|",sep,"$)"),"",
+                 gsub(paste0(sep,sep),sep,
+                      do.call(paste,c(L,list(sep=sep)))))
+     is.na(ret) <- ret==""
+     ret
+     }
+
+EMIS <- read.csv('N:/ABR/TradeWasteCustomers/15062017_ActiveInactive.csv',
+                          stringsAsFactors=FALSE,
+                 skip=6) %>%
+        select(AG_CONSUMERNUMBER, textbox11, textbox65, textbox43, textbox46, textbox49, textbox53, textbox56) %>%   mutate(MASTERID = as.numeric(substr(AG_CONSUMERNUMBER, 3, 9))) 
+
+EMIS$ADDRESS_STRING <- paste3(paste3(EMIS$textbox11, EMIS$textbox65, EMIS$textbox43), paste3(EMIS$textbox46, EMIS$textbox49), paste3(EMIS$textbox53, "VIC", EMIS$textbox56), sep = ", ") 
+
+# EMIS <- EMIS %>%
+#         select(MASTERID, ADDRESS_STRING)
+
+write.csv(EMIS, "N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/150617_unlabelled_EMIS.csv",
+          row.names = F)
+
+```
+
+```{r read in raw Gentrack}
+
+Gentrack <- read.csv('file:///N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/8. Gentrack/Metersequencesdetail_June17.csv',
+                          stringsAsFactors=FALSE,
+                 skip=3) 
+
+Gentrack <- as.data.table(Gentrack)
+
+Network_count <- Gentrack[,.N,by=c("NETWORKNO")][!is.na(NETWORKNO)]
+
+setkey(Network_count, "NETWORKNO") 
+
+Install_network <- Gentrack[,c("INSTALL", "NETWORKNO")]
+
+setkey(Install_network, "NETWORKNO") 
+
+Install_count <- Install_network[Network_count]
+
+Install_count <- Install_count[, MASTERID := as.integer(substring(INSTALL, 3,9))]
+
+Install_count <- Install_count[, c("INSTALL", "MASTERID", "NETWORKNO", "N") ]
+
+write.csv(Install_count, "file:///N:/FWBI/SDCanalysis/Comms/Letters phase three/Install_network_count.csv", row.names = F)
+
+unlabelled_gentrack <- Gentrack %>% 
+                       select(INSTALL, INSTALL_ADDRESS) %>%
+                       distinct() %>% 
+                       mutate(MASTERID = as.integer(substr(as.character(INSTALL), 3, 9))) %>%
+                       filter(MASTERID %in% EMIS$MASTERID) %>%
+                       mutate(MASTERID = as.character(MASTERID))
+
+write.csv(unlabelled_gentrack, "N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/8. Gentrack/190617_unlabelled_Gentrack.csv",
+          row.names = F)
+
+```
+
+```{python DHHS parserator}
+import re
+import GNAF
+import itertools
+import operator
+
+import pandas as pd
+
+unlabelled = pd.read_csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_unlabelled_DHHS.csv", header=None)
+
+site = unlabelled[0]
+
+unlabelled = unlabelled[4].apply(lambda x: re.sub(r', Australia$', "", x))
+
+def accumulate(l):
+    it = itertools.groupby(l, operator.itemgetter(1))
+    for key, subiter in it:
+       yield key, ' '.join(item[0] for item in subiter)
+
+labelled = unlabelled.apply(lambda x: GNAF.parse(x))
+
+labelled = labelled.apply(lambda x: list(accumulate(x)))
+
+cols = ['SITE','ADDRESS_STRING', 'BUILDING_NAME', 'LOT_NUMBER_PREFIX', 'LOT_NUMBER', 'LOT_NUMBER_SUFFIX', 'LEVEL_TYPE', 'LEVEL_NUMBER', 'FLAT_TYPE', 'FLAT_NUMBER_PREFIX', 'FLAT_NUMBER', 'FLAT_NUMBER_SUFFIX',
+        'NUMBER_FIRST', 'NUMBER_FIRST_SUFFIX',  'NUMBER_LAST', 'STREET_NAME', 'STREET_TYPE_CODE', 'LOCALITY_NAME',
+        'POSTCODE', 'STATE_ABBREVIATION']
+
+df = pd.DataFrame(columns=cols)
+
+df['SITE'] = site
+
+df['ADDRESS_STRING'] = unlabelled
+
+for i, row in enumerate(labelled):
+    for item in row:
+        df[item[0]][i] = item[1]
+        
+df2 = df.ix[1:]
+
+df2.to_csv('N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_labelled_DHHS.csv', index=False)
+
+```
+
+```{python EMIS parserator}
+import re
+import GNAF
+import itertools
+import operator
+
+import pandas as pd
+
+unlabelled = pd.read_csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/150617_unlabelled_EMIS.csv", header=None)
+
+site = unlabelled[0]
+
+unlabelled = unlabelled[9].apply(lambda x: re.sub(r', Australia$', "", x))
+
+def accumulate(l):
+    it = itertools.groupby(l, operator.itemgetter(1))
+    for key, subiter in it:
+       yield key, ' '.join(item[0] for item in subiter)
+
+labelled = unlabelled.apply(lambda x: GNAF.parse(x))
+
+labelled = labelled.apply(lambda x: list(accumulate(x)))
+
+cols = ['SITE','ADDRESS_STRING', 'BUILDING_NAME', 'LOT_NUMBER_PREFIX', 'LOT_NUMBER', 'LOT_NUMBER_SUFFIX', 'LEVEL_TYPE', 'LEVEL_NUMBER', 'FLAT_TYPE', 'FLAT_NUMBER_PREFIX', 'FLAT_NUMBER', 'FLAT_NUMBER_SUFFIX',
+        'NUMBER_FIRST', 'NUMBER_FIRST_SUFFIX',  'NUMBER_LAST', 'STREET_NAME', 'STREET_TYPE_CODE', 'LOCALITY_NAME',
+        'POSTCODE', 'STATE_ABBREVIATION']
+
+df = pd.DataFrame(columns=cols)
+
+df['SITE'] = site
+
+df['ADDRESS_STRING'] = unlabelled
+
+for i, row in enumerate(labelled):
+    for item in row:
+        df[item[0]][i] = item[1]
+        
+df2 = df.ix[1:]
+
+df2.to_csv('N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/150617_labelled_EMIS.csv', index=False)
+
+```
+
+```{python Gentrack parserator}
+import re
+import GNAF
+import itertools
+import operator
+
+import pandas as pd
+
+unlabelled = pd.read_csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/8. Gentrack/190617_unlabelled_Gentrack.csv", header=None)
+
+site = unlabelled[2]
+
+unlabelled = unlabelled[1]
+
+def accumulate(l):
+    it = itertools.groupby(l, operator.itemgetter(1))
+    for key, subiter in it:
+       yield key, ' '.join(item[0] for item in subiter)
+
+labelled = unlabelled.apply(lambda x: GNAF.parse(x))
+
+labelled = labelled.apply(lambda x: list(accumulate(x)))
+
+cols = ['SITE','ADDRESS_STRING', 'BUILDING_NAME', 'LOT_NUMBER_PREFIX', 'LOT_NUMBER', 'LOT_NUMBER_SUFFIX', 'LEVEL_TYPE', 'LEVEL_NUMBER', 'FLAT_TYPE', 'FLAT_NUMBER_PREFIX', 'FLAT_NUMBER', 'FLAT_NUMBER_SUFFIX',
+        'NUMBER_FIRST', 'NUMBER_FIRST_SUFFIX',  'NUMBER_LAST', 'STREET_NAME', 'STREET_TYPE_CODE', 'LOCALITY_NAME',
+        'POSTCODE', 'STATE_ABBREVIATION']
+
+df = pd.DataFrame(columns=cols)
+
+df['SITE'] = site
+
+df['ADDRESS_STRING'] = unlabelled
+
+for i, row in enumerate(labelled):
+    for item in row:
+        df[item[0]][i] = item[1]
+        
+df2 = df.ix[1:]
+
+df2.to_csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/8. Gentrack/190617_labelled_Gentrack.csv", index=False)
+
+```
+
+```{r EMIS parserator training}
+
+labelled_EMIS <- read.csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/160517_labelled_EMIS.csv", stringsAsFactors = F)
+
+
+manual_training <- labelled_EMIS %>%
+                   filter(BUILDING_NAME != "") %>%
+                   sample_frac(0.2)
+
+manual_training2 <- labelled_EMIS %>%
+                   filter(BUILDING_NAME == "") %>%
+                   sample_frac(0.005)
+
+manual_training3 <- rbind(manual_training, manual_training2) %>%
+                    select(ADDRESS_STRING)
+
+write.table(manual_training3, "C:/Users/farrelp1/Documents/GNAFAPI/parserator/data/170517_unlabelled_EMIS.csv",
+          row.names = F, col.names = F)
+
+manual_training <- labelled_EMIS %>%
+                   filter(BUILDING_NAME == "LOT" |
+                            FLAT_TYPE == "PREV" |
+                            grepl("SH", BUILDING_NAME) |
+                            grepl("GRN", BUILDING_NAME) |
+                            grepl("GRD", BUILDING_NAME) |
+                            grepl("LOWERGROUND", BUILDING_NAME) |
+                            grepl("GROUND", FLAT_TYPE) |
+                            FLAT_TYPE == "GR" |
+                            FLAT_TYPE == "G") %>%
+                     select(ADDRESS_STRING)
+
+write.table(manual_training, "C:/Users/farrelp1/Documents/GNAFAPI/parserator/data/170517_unlabelled_EMIS2.csv",
+          row.names = F, col.names = F)
+
+manual_training <- labelled_EMIS %>%
+                   filter(BUILDING_NAME == "PRINCES HIGHWAY," |
+                          BUILDING_NAME == "WELLINGTON PARADE," |
+                          BUILDING_NAME == "OLYMPIC BOULEVARD," |
+                          BUILDING_NAME == "PARK CRESCENT," |
+                          BUILDING_NAME == "MELBOURNE PLACE,") %>%
+                     select(ADDRESS_STRING)
+
+write.table(manual_training, "C:/Users/farrelp1/Documents/GNAFAPI/parserator/data/170517_unlabelled_EMIS3.csv",
+          row.names = F, col.names = F)
+
+manual_training <- labelled_EMIS %>%
+                   filter(grepl("^[A-Z]{1}\\s.*", STREET_NAME)) %>%
+                   select(ADDRESS_STRING)
+
+write.table(manual_training, "C:/Users/farrelp1/Documents/GNAFAPI/parserator/data/090617_unlabelled_EMIS4.csv",
+          row.names = F, col.names = F)
+
+manual_training <- labelled_EMIS %>%
+                   filter(grepl("MELBOURNE UNIVERSITY", ADDRESS_STRING)) %>%
+                   select(ADDRESS_STRING)
+
+write.table(manual_training, "C:/Users/farrelp1/Documents/GNAFAPI/parserator/data/200617_unlabelled_EMIS5.csv",
+          row.names = F, col.names = F)
+
+```
+
+```{r Get GNAF data}
+
+ABR <- odbcDriverConnect(connection="Driver={SQL Server Native Client 11.0};
+                                    server= WVdb1devsql;
+                                    database=ABR;
+                                    uid=CWW\\farrelp1;
+                                    Trusted_Connection=Yes;")
+
+GNAF_address <- sqlQuery(ABR,
+                "SELECT DISTINCT 
+                  [ADDRESS_DETAIL_PID]
+                ,[BUILDING_NAME]
+                ,CASE
+                WHEN [NUMBER_FIRST] % 2 = 0
+                THEN REPLACE(SUBSTRING([STREET_NAME], 1, 1) + 'EVEN', ' ', '')
+                ELSE REPLACE(SUBSTRING([STREET_NAME], 1, 1) + 'ODD', ' ', '')
+                END AS [KEY]
+                ,[LOT_NUMBER]
+                ,[NUMBER_FIRST]
+                ,[NUMBER_LAST]
+                ,[STREET_NAME]
+                ,[STREET_TYPE_CODE]
+                ,CASE
+                WHEN [STREET_TYPE_CODE] IS NULL
+                THEN [STREET_NAME]
+                ELSE [STREET_NAME] + ' ' + [STREET_TYPE_CODE]
+                END AS [STREET]
+                ,[LOCALITY_NAME]
+                ,[POSTCODE]
+                ,[LONGITUDE]
+                ,[LATITUDE]
+                ,CASE
+                WHEN [NUMBER_LAST] IS NULL
+                THEN 1
+                ELSE 2
+                END AS ADDRESS_TYPE
+                ,CONFIDENCE
+                ,[PRIMARY_SECONDARY]
+                FROM [ABR].[dbo].[ADDRESS_VIEW]
+                WHERE [PRIMARY_SECONDARY] = 'P' OR [PRIMARY_SECONDARY] IS NULL;",
+                stringsAsFactors=FALSE)
+
+
+```
+
+```{r Clean DHHS}
+
+text_clean <- function(x, field.type = "text") {
+  
+  if(x == "" | is.na(x)) {
+    
+    return(NA)
+    
+  }
+  
+  else if (field.type == "text"){
+    
+    x <- gsub(",$","",x)
+    
+    return(toupper(x))
+    
+  }
+  
+  else if (field.type == "num"){
+    
+    return(as.numeric(gsub(",","",x)))
+    
+  }
+  
+}
+
+text_clean <- Vectorize(text_clean) 
+
+labelled_DHHS <- read.csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_labelled_DHHS.csv", stringsAsFactors = F)
+
+DHHS_sites <- read.csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_unlabelled_DHHS.csv", stringsAsFactors = F)
+
+indx <- !is.na(labelled_DHHS$NUMBER_FIRST_SUFFIX) & is.numeric(labelled_DHHS$NUMBER_FIRST_SUFFIX)
+
+labelled_DHHS[indx,]$NUMBER_FIRST <- labelled_DHHS[indx,]$NUMBER_FIRST_SUFFIX
+
+labelled_DHHS[indx,]$NUMBER_FIRST_SUFFIX <- NA
+
+indx <- grepl("[A-Z]$", labelled_DHHS$NUMBER_FIRST)
+
+numFirst <- gsub("([0-9]+)[A-Z]", "\\1", labelled_DHHS[indx,]$NUMBER_FIRST)  
+
+suffix <- gsub("([0-9]+)([A-Z])", "\\2", labelled_DHHS[indx,]$NUMBER_FIRST)
+
+labelled_DHHS[indx,]$NUMBER_FIRST <- numFirst
+
+labelled_DHHS[indx,]$NUMBER_FIRST_SUFFIX <- suffix
+
+labelled_DHHS <- labelled_DHHS %>%
+                 mutate(BUILDING_NAME = text_clean(BUILDING_NAME),
+                        LOT_NUMBER_PREFIX = unname(text_clean(LOT_NUMBER_PREFIX)),
+                        LOT_NUMBER = unname(text_clean(LOT_NUMBER, field.type = "num")),
+                        LOT_NUMBER_SUFFIX = unname(text_clean(LOT_NUMBER_SUFFIX)),
+                        LEVEL_TYPE = text_clean(LEVEL_TYPE),
+                        LEVEL_NUMBER = text_clean(LEVEL_NUMBER, field.type = "num"),
+                        FLAT_NUMBER_PREFIX = unname(text_clean(FLAT_NUMBER_PREFIX)),
+                        FLAT_TYPE = unname(text_clean(FLAT_TYPE)),
+                        FLAT_NUMBER_SUFFIX = unname(text_clean(FLAT_NUMBER_SUFFIX)),
+                        FLAT_NUMBER = text_clean(FLAT_NUMBER, field.type = "num"),
+                        NUMBER_FIRST = text_clean(NUMBER_FIRST, field.type = "num"),
+                        NUMBER_LAST = text_clean(NUMBER_LAST, field.type = "num"),
+                        STREET_NAME = text_clean(STREET_NAME),
+                        STREET_TYPE_CODE = text_clean(STREET_TYPE_CODE),
+                        LOCALITY_NAME = text_clean(LOCALITY_NAME),
+                        POSTCODE = text_clean(POSTCODE, field.type = "num"),
+                        STATE_ABBREVIATION = text_clean(STATE_ABBREVIATION)
+                        # KEY = gsub(" ", "", paste0(#substr(LOCALITY_NAME, 1,3), 
+                        #              substr(gsub("'","", STREET_NAME), 1,1),
+                        #              ifelse(NUMBER_FIRST %% 2 == 0, "EVEN", "ODD"))),
+                        # ID = row_number(),
+                        # ADDRESS_TYPE = ifelse(is.na(NUMBER_LAST), 1, 2)
+                        ) %>%
+                  left_join(select(DHHS_sites, -ADDRESS_STRING, -ACCURACY), by = "SITE") #%>%
+                  #mutate(LATLON = paste(LATITUDE, LONGITUDE, sep=","))
+
+sqlSave(ABR, labelled_DHHS, tablename = "DHHS_CT_address_labelled", rownames = F)
+
+write.csv(labelled_DHHS, "N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/210917_labelled_DHHS.csv", row.names = F)
+
+GNAF_address <- GNAF_address %>%
+                mutate(PID = as.numeric(gsub("GAVIC", "", ADDRESS_DETAIL_PID)))
+
+
+Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev6.4.cpp")
+#Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev6.1.cpp")
+#Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev7.cpp")
+#Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev9.cpp")
+#Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev10.cpp")
+
+Clean2 <- function(nonblanks, ID) {
+
+  # GNAF_address <- data.table::fread("C:/Users/farrelp1/Documents/GNAFAPI/data/May17_GNAF.csv", stringsAsFactors = F)
+  # 
+  # colnames(GNAF_address) <- colnames(data.table::fread("C:/Users/farrelp1/Documents/AddressR/data/May17_GNAF_address.csv", stringsAsFactors = F))[1:15]
+  
+  options <- lapply(nonblanks$KEY, function(x) which(x == GNAF_address$KEY))
+
+  names(options) <- ID
+
+  totalscore <- lapply(seq_along(options), function(i) parallelAddressTotalScore6(nonblanks[i,], GNAF_address[options[[i]],]))
+  
+  names(totalscore) <- ID
+  
+  options2 <- lapply(seq_along(options), function(i) cbind(option = suppressWarnings(options[[i]][which(totalscore[[i]] == min(totalscore[[i]]))]), 
+                                                           score = suppressWarnings(totalscore[[i]][which(totalscore[[i]] == min(totalscore[[i]]))])))
+
+  names(options2) <- names(options)
+
+  options3 <- options2[unname(unlist(lapply(options2, function(x) nrow(x) > 0)))]
+  
+  finalresult <- plyr::ldply(names(options3), function(i) cbind(id = i,options3[[i]], GNAF_address[options2[[i]][,1],]))
+
+  # finalresult <- plyr::ldply(names(options3), function(i) cbind(id = i,options3[[i]], GNAF_address[options2[[i]][,1],])) %>%
+  #                 mutate(id = as.numeric(as.character(id))) %>%
+  #                 group_by(id) %>%
+  #                 filter(CONFIDENCE == max(CONFIDENCE))
+
+  #finalresult <- plyr::ldply(options4, function(x) x %>% filter(CONFIDENCE == max(CONFIDENCE))) #%>%
+                 #mutate(ID = as.numeric(.id))
+
+  #dup <- finalresult[duplicated(finalresult$.id),]
+
+  #CWW_TradeWaste_ABR <- select(finalresult, AG_CONSUMERNUMBER, ADDRESS_DETAIL_PID) %>% distinct()
+
+  return(finalresult)
+
+}
+
+Clean3 <- function(nonblanks, ID) {
+
+  GNAF_address2 <- data.table::as.data.table(GNAF_address)
+  
+  setkey(GNAF_address2, "KEY")
+  
+  nonblanks2 <- data.table::as.data.table(nonblanks)
+  
+  setkey(nonblanks2, "KEY")
+  
+  totalscore2 <- lapply(1:nrow(nonblanks2), function(i) {
+    
+    if(!is.na(nonblanks2[[i, "NUMBER_FIRST"]])) {
+    options <- GNAF_address2[GNAF_address2[["KEY"]] == nonblanks2[[i, "KEY"]] & GNAF_address2[["NUMBER_FIRST"]] < nonblanks2[[i, "NUMBER_FIRST"]] + 50 & GNAF_address2[["NUMBER_FIRST"]] > nonblanks2[[i, "NUMBER_FIRST"]] - 50]
+    }
+    
+    else if(!is.na(nonblanks2[[i, "LOT_NUMBER"]])) {
+      
+      options <- GNAF_address2 %>% filter(!is.na(LOT_NUMBER))
+      
+    }
+    
+    else {
+      
+     # options <- GNAF_address2[gsub("([A-Z])(.*)", "\\1", GNAF_address2[["KEY"]]) == gsub("([A-Z])(.*)", "\\1", nonblanks2[[i, "KEY"]])] 
+      
+      options <- GNAF_address2 %>% filter(!is.na(BUILDING_NAME))
+      
+    }
+    
+    result <- parallelAddressTotalScore6(nonblanks2[i,], options)
+    
+    colnames(result) = options[["ADDRESS_DETAIL_PID"]]
+    
+    return(result)
+    })
+  
+  names(totalscore2) <- nonblanks2[["SITE"]]
+
+  setkey(GNAF_address2, "ADDRESS_DETAIL_PID")
+  
+  finalresult <- plyr::ldply(names(totalscore2), function(i) {
+    
+    if(length(totalscore2[[i]]) > 0) {
+      
+      ADDRESS_DETAIL_PID <- names(totalscore2[[i]][,which.min(totalscore2[[i]])])
+      
+      score <- as.numeric(unname(totalscore2[[i]][,which.min(totalscore2[[i]])]))
+  
+      result <- as.data.table(cbind(id = as.numeric(i), ADDRESS_DETAIL_PID = ADDRESS_DETAIL_PID, score = score))
+      
+      setkey(result, "ADDRESS_DETAIL_PID")
+    
+      return(GNAF_address2[result])
+    
+    }
+    
+    else{}
+    
+    })
+
+  finalresult$score <- as.numeric(finalresult$score)
+  
+  return(finalresult)
+
+}
+
+#AddressR::AddressClean2
+#DHHS_GNAF <- AddressR::AddressClean2(nonblanks=labelled_DHHS, ID=labelled_DHHS$ID)
+
+DHHS_GNAF <- Clean3(nonblanks=labelled_DHHS, ID=labelled_DHHS$SITE)
+
+# for (i in seq_along(options)) {
+#   
+#   r <- parallelAddressTotalScore3(nonblanks[i, ], GNAF_address[options[[i]], ])
+#   
+# }
+
+# test <- parallelAddressTotalScore9(labelled_DHHS[1,], GNAF_address) works but very slow
+#test <- parallelAddressTotalScore10(labelled_DHHS[1:2,], GNAF_address)
+
+```
+
+```{r Gentrack clean}
+
+text_clean <- function(x, field.type = "text") {
+  
+  if(x == "" | is.na(x)) {
+    
+    return(NA)
+    
+  }
+  
+  else if (field.type == "text"){
+    
+    x <- gsub(",$","",x)
+    
+    x <- stringr::str_trim(x, "both")
+    #x <- gsub("\\s{2,}","",x)
+    
+    return(toupper(x))
+    
+  }
+  
+  else if (field.type == "num"){
+    
+    return(as.numeric(gsub(",","",x)))
+    
+  }
+  
+}
+
+#stringr::str_trim()
+
+text_clean <- Vectorize(text_clean) 
+
+EMIS_sites <- read.csv('N:/ABR/TradeWasteCustomers/15062017_ActiveInactive.csv',
+                          stringsAsFactors=FALSE,
+                 skip=6) %>%
+        select(AG_CONSUMERNUMBER, AG_COMPANYNAME, AG_TRADINGNAME, textbox11, textbox65, textbox43, textbox46, textbox49, textbox53, textbox56, PLD_PROPERTYXYCOORDINATE) %>% 
+  mutate(AG_COMPANYNAME = ifelse(AG_TRADINGNAME == "", AG_COMPANYNAME, AG_TRADINGNAME),
+         SITE = AG_CONSUMERNUMBER,
+         LAT=as.integer(gsub("([0-9]{6})([0-9]{7})","\\1",PLD_PROPERTYXYCOORDINATE)),
+         LON=as.integer(gsub("([0-9]{6})([0-9]{7})","\\2",PLD_PROPERTYXYCOORDINATE)))
+
+
+
+CWWBoundary <- rgdal::readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp", 
+                       layer="CWW Boundary_2014_region")
+
+EMIS_sp <- EMIS_sites %>%
+           filter(!is.na(LAT) & LAT != 0 & LAT != 999999)
+
+EMIS_sp <- sp::SpatialPointsDataFrame(coords=data.frame(X=EMIS_sp$LAT, Y=EMIS_sp$LON),
+                           data=data.frame(SITE=EMIS_sp$SITE),
+                           proj4string=sp::CRS(proj4string(CWWBoundary)))
+
+EMIS_sp <- sp::spTransform(EMIS_sp, sp::CRS("+init=epsg:4326 +proj=longlat"))
+
+EMIS_sites <- EMIS_sites %>%
+              left_join(data.frame(SITE=EMIS_sp@data, 
+                                   LATITUDE = EMIS_sp@coords[,2], 
+                                   LONGITUDE = EMIS_sp@coords[,1]))
+              
+
+labelled_EMIS <- read.csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/150617_labelled_EMIS.csv", stringsAsFactors = F) %>%
+  #left_join(select(EMIS_sites, SITE, AG_COMPANYNAME)) %>%
+  mutate(MASTERID = as.character(format(SITE, scientific=FALSE))) %>%
+  mutate(#BUILDING_NAME = ifelse(BUILDING_NAME == "", AG_COMPANYNAME, BUILDING_NAME),
+         MASTERID = as.integer(substr(MASTERID, 3, 9)))
+
+indx <- !is.na(labelled_EMIS$NUMBER_FIRST_SUFFIX) & is.numeric(labelled_EMIS$NUMBER_FIRST_SUFFIX)
+
+if(any(indx == TRUE)) {
+  labelled_EMIS[indx,]$NUMBER_FIRST <- labelled_EMIS[indx,]$NUMBER_FIRST_SUFFIX
+  
+  labelled_EMIS[indx,]$NUMBER_FIRST_SUFFIX <- NA
+}
+
+indx <- grepl("[A-Z]$", labelled_EMIS$NUMBER_FIRST)
+
+if(any(indx == TRUE)) {
+  numFirst <- gsub("([0-9]+)[A-Z]", "\\1", labelled_EMIS[indx,]$NUMBER_FIRST)  
+  
+  suffix <- gsub("([0-9]+)([A-Z])", "\\2", labelled_EMIS[indx,]$NUMBER_FIRST)
+  
+  labelled_EMIS[indx,]$NUMBER_FIRST <- numFirst
+  
+  labelled_EMIS[indx,]$NUMBER_FIRST_SUFFIX <- suffix
+}
+
+indx <- grepl("^[A-Z]{1}\\s.*", labelled_EMIS$STREET_NAME)
+
+if(any(indx == TRUE)) {
+ 
+  suffix <- gsub("^([A-Z]{1})\\s(.*)", "\\1", labelled_EMIS[indx,]$STREET_NAME)  
+  
+  streetname <- gsub("^([A-Z]{1})\\s(.*)", "\\2", labelled_EMIS[indx,]$STREET_NAME)  
+  
+  labelled_EMIS[indx,]$NUMBER_FIRST_SUFFIX <- suffix
+  
+  labelled_EMIS[indx,]$STREET_NAME <- streetname
+   
+}
+
+indx <- grepl("^MOUNT\\s.*", labelled_EMIS$STREET_NAME)
+
+labelled_EMIS$STREET_NAME[indx] <- gsub("^(MOUNT)", "MT", labelled_EMIS[indx,]$STREET_NAME) 
+
+indx <- grepl("^17C\\s.*", labelled_EMIS$STREET_NAME)
+
+labelled_EMIS$STREET_NAME[indx] <- gsub("^(17C\\s)(.*)", "\\2", labelled_EMIS[indx,]$STREET_NAME) 
+
+labelled_EMIS <- labelled_EMIS %>%
+                 mutate(BUILDING_NAME = unname(text_clean(BUILDING_NAME)),
+                        LOT_NUMBER_PREFIX = unname(text_clean(LOT_NUMBER_PREFIX)),
+                        LOT_NUMBER = unname(text_clean(LOT_NUMBER, field.type = "num")),
+                        LOT_NUMBER_SUFFIX = unname(text_clean(LOT_NUMBER_SUFFIX)),
+                        LEVEL_TYPE = unname(text_clean(LEVEL_TYPE)),
+                        LEVEL_NUMBER = unname(text_clean(LEVEL_NUMBER, field.type = "num")),
+                        FLAT_NUMBER_PREFIX = unname(text_clean(FLAT_NUMBER_PREFIX)),
+                        FLAT_TYPE = unname(text_clean(FLAT_TYPE)),
+                        FLAT_NUMBER_SUFFIX = unname(text_clean(FLAT_NUMBER_SUFFIX)),
+                        FLAT_NUMBER = unname(text_clean(FLAT_NUMBER, field.type = "num")),
+                        NUMBER_FIRST = unname(text_clean(NUMBER_FIRST, field.type = "num")),
+                        NUMBER_FIRST_SUFFIX = unname(text_clean(NUMBER_FIRST_SUFFIX)),
+                        NUMBER_LAST = unname(text_clean(NUMBER_LAST, field.type = "num")),
+                        STREET_NAME = unname(text_clean(STREET_NAME)),
+                        STREET_TYPE_CODE = unname(text_clean(STREET_TYPE_CODE)),
+                        LOCALITY_NAME = unname(text_clean(LOCALITY_NAME)),
+                        POSTCODE = unname(text_clean(POSTCODE, field.type = "num")),
+                        STATE_ABBREVIATION = unname(text_clean(STATE_ABBREVIATION)),
+                        KEY = gsub(" ", "", paste0(#substr(LOCALITY_NAME, 1,3), 
+                                     substr(gsub("'","", STREET_NAME), 1,1),
+                                     ifelse(NUMBER_FIRST %% 2 == 0, "EVEN", "ODD"))),
+                        #ID = row_number(),
+                        ADDRESS_TYPE = ifelse(is.na(NUMBER_LAST), 1, 2)) #%>%
+                        #left_join(labelled_Gentrack, by = "MASTERID")
+
+ labelled_Gentrack <- read.csv("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/8. Gentrack/190617_labelled_Gentrack.csv", stringsAsFactors = F) %>%
+   mutate(MASTERID = SITE)
+
+labelled_Gentrack <- labelled_Gentrack %>%
+                 mutate(BUILDING_NAME = unname(text_clean(BUILDING_NAME)),
+                        LOT_NUMBER_PREFIX = unname(text_clean(LOT_NUMBER_PREFIX)),
+                        LOT_NUMBER = unname(text_clean(LOT_NUMBER, field.type = "num")),
+                        LOT_NUMBER_SUFFIX = unname(text_clean(LOT_NUMBER_SUFFIX)),
+                        LEVEL_TYPE = unname(text_clean(LEVEL_TYPE)),
+                        LEVEL_NUMBER = unname(text_clean(LEVEL_NUMBER, field.type = "num")),
+                        FLAT_NUMBER_PREFIX = unname(text_clean(FLAT_NUMBER_PREFIX)),
+                        FLAT_TYPE = unname(text_clean(FLAT_TYPE)),
+                        FLAT_NUMBER_SUFFIX = unname(text_clean(FLAT_NUMBER_SUFFIX)),
+                        FLAT_NUMBER = unname(text_clean(FLAT_NUMBER, field.type = "num")),
+                        NUMBER_FIRST = unname(text_clean(NUMBER_FIRST, field.type = "num")),
+                        NUMBER_FIRST_SUFFIX = unname(text_clean(NUMBER_FIRST_SUFFIX)),
+                        NUMBER_LAST = unname(text_clean(NUMBER_LAST, field.type = "num")),
+                        STREET_NAME = unname(text_clean(STREET_NAME)),
+                        STREET_TYPE_CODE = unname(text_clean(STREET_TYPE_CODE)),
+                        LOCALITY_NAME = unname(text_clean(LOCALITY_NAME)),
+                        POSTCODE = unname(text_clean(POSTCODE, field.type = "num")),
+                        STATE_ABBREVIATION = unname(text_clean(STATE_ABBREVIATION)),
+                        KEY = gsub(" ", "", paste0(#substr(LOCALITY_NAME, 1,3), 
+                                     substr(gsub("'","", STREET_NAME), 1,1),
+                                     ifelse(NUMBER_FIRST %% 2 == 0, "EVEN", "ODD"))),
+                        #ID = row_number(),
+                        ADDRESS_TYPE = ifelse(is.na(NUMBER_LAST), 1, 2)) 
+ 
+
+# labelled_Gentrack <- labelled_Gentrack %>%
+#   left_join(select(mutate(Gentrack, 
+#                           MASTERID = as.integer(substr(as.character(INSTALL), 3, 9))),
+#                           MASTERID,
+#                           AG_COMPANYNAME)) %>%
+#   #mutate(MASTERID = as.character(format(SITE, scientific=FALSE))) %>%
+#   mutate(BUILDING_NAME = ifelse(is.na(BUILDING_NAME), AG_COMPANYNAME, BUILDING_NAME))
+
+labelled_EMIS2 <- labelled_EMIS
+
+lapply(1:nrow(labelled_EMIS), function(i) {
+  
+  NUMBER_FIRST = labelled_EMIS[i,]$NUMBER_FIRST
+  
+  LOT_NUMBER = labelled_EMIS[i,]$LOT_NUMBER
+  
+  MASTERID = labelled_EMIS[i,]$MASTERID
+  
+  REPLACEMENT = labelled_Gentrack[labelled_Gentrack$MASTERID == MASTERID,] #%>% 
+                #filter(!is.na(NUMBER_FIRST)) %>%
+                #distinct()
+  
+  if(nrow(REPLACEMENT) > 0) {
+    
+    if(is.na(NUMBER_FIRST) & is.na(LOT_NUMBER)) {
+      
+      REPLACEMENT$SITE <- rep(labelled_EMIS[i,]$SITE, nrow(REPLACEMENT))
+      
+      labelled_EMIS2 <<- rbind(labelled_EMIS2, REPLACEMENT)
+      
+      labelled_EMIS2 <<- labelled_EMIS2[-i,]
+      
+    }
+  }
+})
+
+labelled_EMIS3 <- labelled_EMIS2 %>%
+  left_join(select(EMIS_sites, SITE, AG_COMPANYNAME, LATITUDE, LONGITUDE), by = "SITE") %>%
+  #mutate(MASTERID = as.character(format(SITE, scientific=FALSE))) %>%
+  mutate(BUILDING_NAME = ifelse(is.na(BUILDING_NAME), AG_COMPANYNAME, BUILDING_NAME),
+         SITE = as.character(SITE)
+         #LATLON = ifelse(!is.na(LATITUDE) & !is.na(LONGITUDE), paste(LATITUDE, LONGITUDE, sep=","), NA),
+         #STREET_NUMBER = paste3(NUMBER_FIRST, NUMBER_LAST, sep = "-")
+         ) %>%
+  distinct() #%>%
+  #select(1:20, LATITUDE:LONGITUDE)
+
+sqlSave(ABR, labelled_EMIS3, tablename = "CWW_EMIS_address_labelled", rownames = F)
+
+write.csv(labelled_EMIS2, "N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/260617_labelled_EMIS.csv", row.names = F)
+
+```
+
+```{r Clean EMIS}
+
+#Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev6.cpp")
+
+Rcpp::sourceCpp("C:/Users/farrelp1/Documents/AddressR/src/AddressMatchTotalScorev6.4.cpp")
+
+# labelled_EMIS2$LATITUDE = rep(as.numeric(NA), length=nrow(labelled_EMIS2))
+# 
+# labelled_EMIS2$LONGITUDE = rep(as.numeric(NA), length=nrow(labelled_EMIS2))
+
+# sample <- labelled_EMIS %>% mutate(SITE=as.numeric(SITE)) %>% filter(!is.na(BUILDING_NAME) & is.na(NUMBER_FIRST)) %>% sample_n(10)
+
+EMIS_GNAF <- Clean3(nonblanks=labelled_EMIS2, ID=labelled_EMIS2 %>% distinct() %>% .[["SITE"]])
+
+```
+
+```{r DHHS No Trade waste}
+
+DHHS_GNAF2 <- DHHS_GNAF %>%
+              select(ADDRESS_DETAIL_PID, id, NUMBER_FIRST:LATITUDE) %>% 
+              mutate(id = as.numeric(id)) %>%
+              #left_join(CoolingTower_Sites, by=c("id" = "SITE")) %>%
+              left_join(select(labelled_DHHS, SITE, BUILDING_NAME), by=c("id" = "SITE")) %>%
+              as.data.table()
+
+setkey(DHHS_GNAF2, "ADDRESS_DETAIL_PID")
+
+#EMIS_GNAF2 <- as.data.table(EMIS_GNAF)
+
+EMIS_GNAF2 <- EMIS_GNAF %>%
+              select(ADDRESS_DETAIL_PID, id) %>% 
+              mutate(id = as.numeric(id)) %>%
+              #left_join(CoolingTower_Sites, by=c("id" = "SITE")) %>%
+              #left_join(select(labelled_EMIS, SITE, BUILDING_NAME), by=c("id" = "SITE")) %>%
+              as.data.table()
+
+setkey(EMIS_GNAF2, "ADDRESS_DETAIL_PID")
+
+overlay <- EMIS_GNAF2[DHHS_GNAF2]
+
+```
+
+```{r DHHS address range-check}
+
+# options <- EMIS_GNAF[EMIS_GNAF$STREET == overlay[overlay$ADDRESS_DETAIL_PID == "GAVIC411790346"]$STREET,]
+# 
+# options$EVEN <- ifelse(options$NUMBER_FIRST %% 2 == 0, "EVEN", "ODD")
+# 
+# overlay$EVEN <- ifelse(overlay$NUMBER_FIRST %% 2 == 0, "EVEN", "ODD")
+# 
+# match <- options[overlay[overlay$ADDRESS_DETAIL_PID == "GAVIC411790346"]$NUMBER_FIRST <= options$NUMBER_LAST &  overlay[overlay$ADDRESS_DETAIL_PID == "GAVIC411790346"]$NUMBER_FIRST >= options$NUMBER_FIRST & overlay[overlay$ADDRESS_DETAIL_PID == "GAVIC411790346"]$EVEN == options$EVEN,]$ADDRESS_DETAIL_PID 
+# 
+# match <- unique(match[!is.na(match)])
+# 
+# names(match) <- rep(overlay[overlay$ADDRESS_DETAIL_PID == "GAVIC411790346"]$i.id, length(match))
+# 
+# match <- plyr::ldply(match, function(x) c(ADDRESS_DETAIL_PID = unname(x), SITE = names(x))) %>%
+#          left_join(EMIS_GNAF) %>%
+#          .[["id"]]
+
+overlay$EVEN <- ifelse(overlay$NUMBER_FIRST %% 2 == 0, "EVEN", "ODD")
+
+range_check <- function(ID, STREET, NUMBER_FIRST, EVEN, EMIS_GNAF) {
+  
+  if(is.na(ID)) {
+    
+    options <- EMIS_GNAF[EMIS_GNAF$STREET == STREET,]
+    
+    if(nrow(options) > 0) {
+    
+      options$EVEN <- ifelse(options$NUMBER_FIRST %% 2 == 0, "EVEN", "ODD")
+      
+      match <- options[NUMBER_FIRST <= options$NUMBER_LAST & NUMBER_FIRST >= options$NUMBER_FIRST & EVEN == options$EVEN,]$ADDRESS_DETAIL_PID 
+      
+      match2 <- unique(match[!is.na(match)])
+      
+      #names(match2) <- rep("ADDRESS_DETAIL_PID", length(match2))
+      if(length(match2) > 0) {
+        
+        match3 <- plyr::ldply(match2)  %>%
+                 left_join(EMIS_GNAF, by = c("V1" = "ADDRESS_DETAIL_PID")) %>%
+                 .[["id"]]
+        
+        return(match3)
+        
+      }
+    
+    }
+  }
+}
+
+results <- sapply(1:nrow(overlay), function(x) range_check(overlay$id[x], overlay$STREET[x], overlay$NUMBER_FIRST[x], overlay$EVEN[x], EMIS_GNAF))
+
+names(results) <- overlay$i.id
+
+# df <- data.frame(matrix(unlist(results), nrow=length(unlist(results[unlist(lapply(results, function(x) length(x) > 0))])), byrow=T))
+
+df <- plyr::ldply(lapply(seq_along(results), function(i) data.frame(CONSUMER = results[[i]],
+                                                                    i.id = rep(names(results[i]), length(results[[i]])), stringsAsFactors = F))) %>%
+      mutate(i.id = as.numeric(i.id))
+
+#do( data.frame(column = rep(results, each = length(results)), stringsAsFactors = FALSE) )
+
+overlay <- overlay %>%
+           left_join(df) %>%
+           mutate(id = ifelse(is.na(id), CONSUMER, id)) %>%
+           select(ADDRESS_DETAIL_PID:BUILDING_NAME) %>%
+           filter(is.na(id)) %>%
+           distinct()
+
+```
+
+```{r spatial Clip}
+
+# VICMAP_LandUse <- readOGR("N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/2. Zones/ll_gda94/plan_overlay.shp", 
+#                           layer="plan_overlay")
+
+gap <- sp::SpatialPointsDataFrame(coords = data.frame(X=overlay$LONGITUDE, Y=overlay$LATITUDE),
+                                  data=data.frame(id = overlay$i.id),
+                                  proj4string=sp::CRS("+init=epsg:4326 +proj=longlat")) %>%
+       sp::spTransform(sp::CRS(sp::proj4string(CWWBoundary)))
+
+
+
+#VICMAP_LandUse2 <- spTransform(VICMAP_LandUse, CRS(proj4string(CWWBoundary)))
+
+#proj4string(CWWBoundary) 
+gap_cww <- gap[which(rgeos::gContains(CWWBoundary, gap, byid = TRUE)), ] 
+
+gap_cww <- gap_cww@data %>%
+           left_join(select(overlay, 1, i.id:BUILDING_NAME), by = c("id"= "i.id"))
+
+```
+
+```{r foreach}
+
+GNAF_address2 <- data.table::as.data.table(GNAF_address)
+  
+setkey(GNAF_address2, "KEY")
+
+colcount <- max(GNAF_address2[, .N, by="KEY"][["N"]])
+
+rowcount <- nrow(GNAF_address2[, .N, by="KEY"])
+
+keymap <- matrix(nrow=rowcount, ncol=colcount)
+
+rownames(keymap) <- GNAF_address2[, .N, by="KEY"][["KEY"]]
+
+counts <- GNAF_address2[, .N, by="KEY"]
+
+cnames <- c("STREET", "LOCALITY_NAME")
+
+for(key in rownames(keymap)) {
+  
+  keymap[key, 1:counts[KEY == key][["N"]]] <- GNAF_address2[KEY == key, ADDRESS_DETAIL_PID]
+  
+}
+
+# for(key in rownames(keymap)) {
+#   
+#   keymap[key, 1:counts[KEY == key][["N"]]] <- GNAF_address2[KEY == key, ADDRESS_DETAIL_PID]
+#   
+# }
+
+labelled_DHHS2 <- data.table::as.data.table(labelled_DHHS)
+  
+setkey(labelled_DHHS2, "KEY")
+
+cnames <- c("STREET", "LOCALITY_NAME")
+
+score <- list()
+
+STREET_SCORE <- matrix(nrow = nrow(labelled_DHHS2), ncol = ncol(keymap))
+
+rownames(STREET_SCORE) <- labelled_DHHS2[["SITE"]]
+
+LOCALITY_NAME <- matrix(nrow = nrow(labelled_DHHS2), ncol = ncol(keymap))
+
+rownames(LOCALITY_NAME) <- labelled_DHHS2[["SITE"]]
+
+#labelled_DHHS2[, , by="KEY"]
+
+for(key in unique(labelled_DHHS2[["KEY"]])) {
+   
+  if(key %in% rownames(keymap)) {
+    
+    STREET_SCORE[as.character(labelled_DHHS2[KEY == key, SITE]), 1:counts[KEY == key][["N"]]] <- foreach(i = labelled_DHHS2[KEY == key, STREET_NAME], .combine='rbind') %do% stringdist(i, GNAF_address2[ADDRESS_DETAIL_PID %in% keymap[key,], STREET_NAME])
+    
+    LOCALITY_NAME[as.character(labelled_DHHS2[KEY == key, SITE]), 1:counts[KEY == key][["N"]]] <- foreach(i = labelled_DHHS2[KEY == key, LOCALITY_NAME], .combine='rbind') %do% stringdist(i, GNAF_address2[ADDRESS_DETAIL_PID %in% keymap[key,], LOCALITY_NAME])
+    
+  } #score[[cname]] <- stringdistmatrix(labelled_DHHS2[[cname]], keymap[[cname]])
+   
+}
+  
+# for(key in unique(labelled_DHHS2[["KEY"]])) {
+#    
+#   if(key %in% rownames(keymap)) {
+#     
+#     STREET_SCORE[as.character(labelled_DHHS2[KEY == key, SITE]), 1:counts[KEY == key][["N"]]] <- foreach(i = labelled_DHHS2[KEY == key, STREET_NAME], .combine='rbind') %do% stringdist(i, GNAF_address2[ADDRESS_DETAIL_PID %in% keymap[key,], STREET_NAME])
+#     
+#     LOCALITY_NAME[as.character(labelled_DHHS2[KEY == key, SITE]), 1:counts[KEY == key][["N"]]] <- foreach(i = labelled_DHHS2[KEY == key, LOCALITY_NAME], .combine='rbind') %do% stringdist(i, GNAF_address2[ADDRESS_DETAIL_PID %in% keymap[key,], LOCALITY_NAME])
+#     
+#   } #score[[cname]] <- stringdistmatrix(labelled_DHHS2[[cname]], keymap[[cname]])
+#    
+# }
+
+# foreach(i = GNAF_address2[, .N, by="KEY"]) %do% function(i) keymap[i[["KEY"]], i[["N"]]] <- GNAF_address2[KEY == i[["KEY"]], STREET_NAME]
+
+  
+
+  
+cnames <- c("NUMBER_FIRST", "NUMBER_LAST")
+
+numdiff <- function(x, y) {abs(x - y)}
+
+for(cname in cnames) {
+  
+   score[[cname]] <- foreach(i=labelled_DHHS2[[cname]], .combine='cbind') %do% ifelse(is.na(numdiff(i, gap[[cname]])), 0, numdiff(i, gap[[cname]]))
+   
+   dimnames(score[[cname]]) <- NULL
+}
+
+```
+
+```{r Cooling tower mining}
+
+# STREET_SCORE <- lapply(gap_cww, function(x) {
+#                                        if(names(x) == "STREET") {
+#                                        STREET_SCORE <- stringdist(x$STREET, EMIS_GNAF$STREET)
+#                                        }
+#                                        #SUBURB_SCORE <- stringdist(x$LOCALITY_NAME, EMIS_GNAF$LOCALITY_NAME)
+#                                        })
+# 
+# 
+# idx <- lapply(gap_cww, is.character)
+# 
+# gap_cww[,unname(unlist(idx))][,-1]
+# 
+# idx <- lapply(EMIS_GNAF, is.character)
+# 
+# EMIS_GNAF[,unname(unlist(idx))][,!c("KEY", "PRIMARY_SECONDARY", "id")]
+
+
+gap <- data.table(gap_cww)
+
+add <- function(x) Reduce("+", x)
+
+subtract <- function(x) Reduce("-", x)
+
+EMIS2 <- data.table(EMIS_GNAF)
+
+cnames <- c("STREET", "LOCALITY_NAME")
+
+score <- list()
+  
+for(cname in cnames) {
+   
+   score[[cname]] <- stringdistmatrix(gap[[cname]], EMIS2[[cname]])
+   
+}
+
+result <- matrix(nrow = nrow(gap), ncol = nrow(EMIS2))
+
+numdiff <- function(x, y) {abs(x - y)}
+
+#test <- Map(numdiff, gap[["NUMBER_FIRST"]], EMIS2[["NUMBER_FIRST"]])
+
+#x <- foreach(i=gap[["NUMBER_FIRST"]]) %do% numdiff(i, EMIS2[["NUMBER_FIRST"]])
+
+#x <- foreach(i=EMIS2[["NUMBER_FIRST"]], .combine='rbind') %do% numdiff(i, gap[["NUMBER_FIRST"]])
+
+cnames <- c("NUMBER_FIRST", "NUMBER_LAST")
+
+for(cname in cnames) {
+  
+   score[[cname]] <- foreach(i=EMIS2[[cname]], .combine='cbind') %do% ifelse(is.na(numdiff(i, gap[[cname]])), 0, numdiff(i, gap[[cname]]))
+   
+   dimnames(score[[cname]]) <- NULL
+}
+
+#apply(gap, c(1,2), function(x) )
+
+# for(cname in cnames) {
+#   
+#   for(i in 1:nrow(gap)) {
+#     
+#     for(j in 1:nrow(EMIS2))
+#       
+#       #if(!is.na(gap[[cname]][i])) 
+#         
+#         result[i,j] <- ifelse(is.na(abs(gap[[cname]][i] - EMIS2[[cname]][j])), 0, abs(gap[[cname]][i] - EMIS2[[cname]][j]))
+#       
+#   }
+#   
+#   score[[cname]] <- result
+#   
+# }
+
+#subtract(list(gap[["NUMBER_FIRST"]], EMIS2[["NUMBER_FIRST"]]))
+
+score2 <- add(score)
+
+score3 <- apply(score2, 1, which.min)
+
+closest_match <- data.table(gap[["id"]], EMIS2[score3,])
+
+```
+
+```{r save}
+
+write.csv(EMIS_GNAF, "file:///N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/7. EMIS/150617_EMIS_GNAF.csv", 
+          row.names = F)
+
+write.csv(DHHS_GNAF, "file:///N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_DHHS_GNAF.csv", 
+          row.names = F)
+
+write.csv(gap_cww, "file:///N:/ABR/Output 1.1 New Trade Waste Customers for 2016-17/5. Cooling Towers/160517_DHHS_gap.csv", 
+          row.names = F)
+
+```
+
+```{r Links table}
+
+Links <- read.delim("C:/Users/farrelp1/Documents/Duke/TW_DHHS_links.txt", sep = ",", header = F, stringsAsFactors = F) %>%
+         mutate(V3 = as.character(format(V3, scientific=F)))
+
+colnames(Links) <- NULL
+
+write.csv(Links, "C:/Users/farrelp1/Documents/Duke/220617_TW_DHHS_links.txt", row.names = F, quote = F)
+
+```
+
+```{r Duke links test}
+
+Links_roundone <- sqlQuery(ABR,
+                "WITH MATCH AS 
+(SELECT
+	LTRIM(RTRIM(
+	CASE 
+        --WHEN [id1] like '%E-%' THEN CAST(CAST([id1] AS FLOAT) AS DECIMAL(18,18))
+        WHEN [id1] like '%E%' THEN CAST(CAST([id1] AS FLOAT) AS DECIMAL)
+        ELSE [id1]
+    END)) AS id1
+    ,LTRIM(RTRIM(
+	CASE 
+        --WHEN [id1] like '%E-%' THEN CAST(CAST([id1] AS FLOAT) AS DECIMAL(18,18))
+        WHEN [id2] like '%E%' THEN CAST(CAST([id2] AS FLOAT) AS DECIMAL)
+        ELSE [id2]
+    END)) AS id2
+      ,[kind]
+      ,[status]
+      ,[timestamp]
+	  ,[confidence]
+FROM LINKS M),
+
+MAX_SCORE AS(
+SELECT DISTINCT id1, MAX(confidence) AS Maxconfidence
+    FROM MATCH
+    GROUP BY id1),
+
+BEST_MATCH AS(
+SELECT 
+M.id1
+,M.id2
+,M.[confidence] 
+FROM MATCH M
+INNER JOIN MAX_SCORE MS ON M.id1 = MS.id1 AND M.confidence = MS.Maxconfidence),
+
+TW AS 
+(SELECT 	
+		LTRIM(RTRIM(CAST(CAST([SITE] AS FLOAT) AS DECIMAL))) AS SITE
+      ,[ADDRESS_STRING]
+      ,[BUILDING_NAME]
+      ,[LOT_NUMBER_PREFIX]
+      ,[LOT_NUMBER]
+      ,[LOT_NUMBER_SUFFIX]
+      ,[LEVEL_TYPE]
+      ,[LEVEL_NUMBER]
+      ,[FLAT_TYPE]
+      ,[FLAT_NUMBER_PREFIX]
+      ,[FLAT_NUMBER]
+      ,[FLAT_NUMBER_SUFFIX]
+      ,[NUMBER_FIRST]
+      ,[NUMBER_FIRST_SUFFIX]
+      ,[NUMBER_LAST]
+      ,[STREET_NAME]
+      ,[STREET_TYPE_CODE]
+      ,[LOCALITY_NAME]
+      ,[POSTCODE]
+      ,[STATE_ABBREVIATION]
+      ,[LATITUDE]
+      ,[LONGITUDE]
+  FROM [ABR].[dbo].[CWW_EMIS_address_labelled]),
+
+DHHS AS 
+(SELECT 	
+		LTRIM(RTRIM(CAST(CAST([SITE] AS FLOAT) AS DECIMAL))) AS SITE
+      ,[ADDRESS_STRING]
+      ,[BUILDING_NAME]
+      ,[LOT_NUMBER_PREFIX]
+      ,[LOT_NUMBER]
+      ,[LOT_NUMBER_SUFFIX]
+      ,[LEVEL_TYPE]
+      ,[LEVEL_NUMBER]
+      ,[FLAT_TYPE]
+      ,[FLAT_NUMBER_PREFIX]
+      ,[FLAT_NUMBER]
+      ,[FLAT_NUMBER_SUFFIX]
+      ,[NUMBER_FIRST]
+      ,[NUMBER_FIRST_SUFFIX]
+      ,[NUMBER_LAST]
+      ,[STREET_NAME]
+      ,[STREET_TYPE_CODE]
+      ,[LOCALITY_NAME]
+      ,[POSTCODE]
+      ,[STATE_ABBREVIATION]
+      ,[LATITUDE]
+      ,[LONGITUDE]
+  FROM [ABR].[dbo].[DHHS_CT_address_labelled])  
+
+SELECT DISTINCT
+id1,
+id2,
+confidence,
+TW.ADDRESS_STRING,
+DHHS.ADDRESS_STRING
+FROM BEST_MATCH
+INNER JOIN TW ON id1 = [SITE]
+LEFT JOIN DHHS on id2 = DHHS.[SITE]
+WHERE confidence > 0.9
+--AND (ABS(CAST(
+--  (BINARY_CHECKSUM(*) *
+--  RAND()) as int)) % 100) < 10
+ORDER BY confidence DESC",
+                stringsAsFactors=FALSE)
+
+write.csv(Links, "C:/Users/farrelp1/Documents/Duke/220617_DHHS_EMIS_roundone.csv", row.names = F)
+
+Links_labelled <- read.csv("C:/Users/farrelp1/Documents/Duke/220617_DHHS_EMIS_roundone_labelled.csv", stringsAsFactors = F) %>%
+                  mutate(V1 = ifelse(Match == "Y", "+", "-"),
+                         V2 = id2, 
+                         V3 = as.character(id1),
+                         V4 = 1) %>%
+                 select(V1:V4)
+
+Links <- read.delim("C:/Users/farrelp1/Documents/Duke/TW_DHHS_links.txt", sep = ",", header = F, stringsAsFactors = F) %>%
+         mutate(V3 = as.character(format(V3, scientific=F))) %>%
+         rbind(Links_labelled)
+
+#dimnames(Links) <- NULL
+
+write.csv(Links, "C:/Users/farrelp1/Documents/Duke/220617_TW_DHHS_links_roundone.txt", row.names = F, quote = F)
+
+```
+
+```{r}
+
+EMIS <- sqlQuery(ABR,
+                "SELECT [SITE]
+      ,[ADDRESS_STRING]
+      ,[BUILDING_NAME]
+      ,[LOT_NUMBER_PREFIX]
+      ,[LOT_NUMBER]
+      ,[LOT_NUMBER_SUFFIX]
+      ,[LEVEL_TYPE]
+      ,[LEVEL_NUMBER]
+      ,[FLAT_TYPE]
+      ,[FLAT_NUMBER_PREFIX]
+      ,[FLAT_NUMBER]
+      ,[FLAT_NUMBER_SUFFIX]
+      ,[NUMBER_FIRST]
+      ,[NUMBER_FIRST_SUFFIX]
+      ,[NUMBER_LAST]
+      ,[STREET_NAME]
+      ,[STREET_TYPE_CODE]
+      ,[LOCALITY_NAME]
+      ,[POSTCODE]
+      ,[STATE_ABBREVIATION]
+      ,[LATITUDE]
+      ,[LONGITUDE]
+      ,'(' + CAST([LATITUDE] AS VARCHAR(20)) + ',' + CAST([LONGITUDE] AS VARCHAR(20)) + ')' AS LATLON
+      FROM [ABR].[dbo].[CWW_EMIS_address_labelled]",
+                stringsAsFactors=FALSE)
+
+# EMIS[,unname(unlist(lapply(EMIS, is.character)))] <- apply(EMIS[,unname(unlist(lapply(EMIS, is.character)))], 2, function(x) gsub("[^[:alnum:]]&[^[:space:]]","",x))
+
+EMIS <- EMIS %>% 
+        mutate(BUILDING_NAME = ifelse(is.na(NUMBER_FIRST) & is.na(NUMBER_LAST), BUILDING_NAME, NA),
+               STREET_NUMBER = paste3(NUMBER_FIRST, NUMBER_LAST, sep = "-")) %>% select(SITE, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME)
+
+# EMIS[,unname(unlist(lapply(EMIS, is.character)))] <- apply(EMIS[,unname(unlist(lapply(EMIS, is.character)))], 2, function(x) stringi::stri_enc_toascii(x))
+
+# EMIS <- apply(EMIS %>% select(SITE, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME), 2, function(x) stringi::stri_enc_toascii(x))
+
+
+#EMIS <- apply(EMIS, 2, function(x) stringi::stri_enc_toascii(x))
+
+write.csv(EMIS, "C:/Users/farrelp1/Envs/dedupe/coolingtowers/EMIS_dedupe.csv", row.names = F)
+
+#saveRDS(EMIS, "C:/Users/farrelp1/Documents/Envs/coolingtowers/EMIS_dedupe.csv", ascii=TRUE)
+
+DHHS <- sqlQuery(ABR,
+                "SELECT [SITE]
+      ,[ADDRESS_STRING]
+      ,[BUILDING_NAME]
+      ,[LOT_NUMBER_PREFIX]
+      ,[LOT_NUMBER]
+      ,[LOT_NUMBER_SUFFIX]
+      ,[LEVEL_TYPE]
+      ,[LEVEL_NUMBER]
+      ,[FLAT_TYPE]
+      ,[FLAT_NUMBER_PREFIX]
+      ,[FLAT_NUMBER]
+      ,[FLAT_NUMBER_SUFFIX]
+      ,[NUMBER_FIRST]
+      ,[NUMBER_FIRST_SUFFIX]
+      ,[NUMBER_LAST]
+      ,[STREET_NAME]
+      ,[STREET_TYPE_CODE]
+      ,[LOCALITY_NAME]
+      ,[POSTCODE]
+      ,[STATE_ABBREVIATION]
+      ,[LATITUDE]
+      ,[LONGITUDE]
+      ,'(' + CAST([LATITUDE] AS VARCHAR(20)) + ',' + CAST([LONGITUDE] AS VARCHAR(20)) + ')' AS LATLON
+  FROM [ABR].[dbo].[DHHS_CT_address_labelled]",
+                stringsAsFactors=FALSE)
+
+DHHS <- DHHS %>% 
+        mutate(BUILDING_NAME = ifelse(is.na(NUMBER_FIRST) & is.na(NUMBER_LAST), BUILDING_NAME, NA),
+               STREET_NUMBER = paste3(NUMBER_FIRST, NUMBER_LAST, sep = "-")) %>% select(SITE, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME)
+
+# DHHS[,unname(unlist(lapply(DHHS, is.character)))] <- apply(DHHS[,unname(unlist(lapply(DHHS, is.character)))], 2, function(x) stringi::stri_enc_toascii(x))
+
+# DHHS <- apply(DHHS %>% select(SITE, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME), 2, function(x) stringi::stri_enc_toascii(x))
+
+#DHHS[,unname(unlist(lapply(DHHS, is.na)))]
+
+#DHHS <- apply(DHHS, 2, function(x) stringi::stri_enc_toascii(x))
+
+write.csv(DHHS, "C:/Users/farrelp1/Envs/dedupe/coolingtowers/DHHS_dedupe.csv", row.names = F)
+
+
+CWWBoundary <- rgdal::readOGR("N:/Asset Information/MUNSYS MapInfo Data/Production/Data/CWW Boundary_2014_region.shp", 
+                       layer="CWW Boundary_2014_region")
+
+GNAF_sp <- sp::SpatialPointsDataFrame(coords = data.frame(X=GNAF_address$LONGITUDE, Y=GNAF_address$LATITUDE),
+                                  data=data.frame(ADDRESS_DETAIL_PID = GNAF_address$ADDRESS_DETAIL_PID),
+                                  proj4string=sp::CRS("+init=epsg:4326 +proj=longlat")) %>%
+       sp::spTransform(sp::CRS(sp::proj4string(CWWBoundary)))
+
+
+
+#VICMAP_LandUse2 <- spTransform(VICMAP_LandUse, CRS(proj4string(CWWBoundary)))
+
+#proj4string(CWWBoundary) 
+GNAF_cww <- GNAF_sp[which(rgeos::gContains(CWWBoundary, GNAF_sp, byid = TRUE)), ] 
+
+GNAF_cww <- sp::spTransform(GNAF_cww, sp::CRS("+init=epsg:4326 +proj=longlat"))
+
+GNAF_cww <- GNAF_cww@data %>%
+            inner_join(GNAF_address)
+
+GNAF <- GNAF_cww %>% 
+        mutate(BUILDING_NAME = ifelse(is.na(NUMBER_FIRST) & is.na(NUMBER_LAST), BUILDING_NAME, NA),
+               STREET_NUMBER = paste3(NUMBER_FIRST, NUMBER_LAST, sep = "-")) %>% select(ADDRESS_DETAIL_PID, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME)
+
+# EMIS[,unname(unlist(lapply(EMIS, is.character)))] <- apply(EMIS[,unname(unlist(lapply(EMIS, is.character)))], 2, function(x) stringi::stri_enc_toascii(x))
+
+# GNAF <- apply(GNAF %>% select(ADDRESS_DETAIL_PID, BUILDING_NAME, STREET_NUMBER, STREET_NAME, STREET_TYPE_CODE, LOCALITY_NAME), 2, function(x) stringi::stri_enc_toascii(x))
+
+
+#EMIS <- apply(EMIS, 2, function(x) stringi::stri_enc_toascii(x))
+
+write.csv(GNAF, "C:/Users/farrelp1/Envs/dedupe/coolingtowers/GNAF_dedupe.csv", row.names = F)
+
+
+"pip install -e /srv/pkg"
+
+"csvlink EMIS_dedupe.csv DHHS_dedupe.csv --config_file=addresses3.json"
+
+"csvlink EMIS_dedupe.csv GNAF_dedupe.csv --config_file=GNAFaddresses.json"
+
+"csvlink EMIS_dedupe.csv DHHS_dedupe.csv --config_file=addresses1.json"
+
+```
+
