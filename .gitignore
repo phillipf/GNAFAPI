@@ -97,6 +97,9 @@ src/*.cpp
 *.sql
 *.sqlite
 
+#cpp
+*.cpp
+
 # OS generated files #
 ######################
 .DS_Store
