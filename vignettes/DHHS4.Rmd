@@ -662,6 +662,8 @@ if(any(indx == TRUE)) {
    
 }
 
+
+
 indx <- grepl("^MOUNT\\s.*", labelled_EMIS$STREET_NAME)
 
 labelled_EMIS$STREET_NAME[indx] <- gsub("^(MOUNT)", "MT", labelled_EMIS[indx,]$STREET_NAME) 
