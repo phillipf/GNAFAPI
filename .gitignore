@@ -111,3 +111,7 @@ src/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Parserator #
+######################
+parserator/
