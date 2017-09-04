@@ -22,4 +22,3 @@ Request()
 \keyword{GNAF,}
 \keyword{Geocode,}
 \keyword{fuzzymatching,}
-

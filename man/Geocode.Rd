@@ -25,4 +25,3 @@ Geocode()
 \keyword{GNAF,}
 \keyword{Geocode,}
 \keyword{fuzzymatching,}
-

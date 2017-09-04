@@ -17,46 +17,46 @@ Geocode <- function(x, y, id, FULL_ADDRESS, radius, fuzzy = FALSE, convert = TRU
 
   if(!require(sp)) {
     message("installing the 'sp' package")
-    install.packages("sp")
+    install.packages("sp",repos = "http://cran.us.r-project.org")
   }
 
   if(!require(rgeos)) {
     message("installing the 'rgeos' package")
-    install.packages("rgeos")
+    install.packages("rgeos",repos = "http://cran.us.r-project.org")
   }
 
   if(!require(rgdal)) {
     message("installing the 'rgdal' package")
-    install.packages("rgdal")
+    install.packages("rgdal",repos = "http://cran.us.r-project.org")
   }
-  
+
   if(!require(modeltools)) {
     message("installing the 'modeltools' package")
-    install.packages("modeltools")
+    install.packages("modeltools",repos = "http://cran.us.r-project.org")
   }
-  
+
   if(!require(mvtnorm)) {
     message("installing the 'mvtnorm' package")
-    install.packages("mvtnorm")
+    install.packages("mvtnorm",repos = "http://cran.us.r-project.org")
   }
-  
+
   if(!require(multcomp)) {
     message("installing the 'multcomp' package")
-    install.packages("multcomp")
+    install.packages("multcomp",repos = "http://cran.us.r-project.org")
   }
-  
+
   if(!require(DEoptimR)) {
     message("installing the 'DEoptimR' package")
-    install.packages("DEoptimR")
+    install.packages("DEoptimR",repos = "http://cran.us.r-project.org")
   }
 
   if(!require(shotGroups)) {
 
     if(!require(devtools)) {
       message("installing the 'devtools' package")
-      install.packages("devtools")
+      install.packages("devtools",repos = "http://cran.us.r-project.org")
     }
-    
+
     message("installing the 'shotGroups' package")
     packageurl <- "https://cran.r-project.org/bin/windows/contrib/3.3/CompQuadForm_1.4.2.zip"
     install.packages(packageurl, repos=NULL, type="source")
@@ -67,17 +67,17 @@ Geocode <- function(x, y, id, FULL_ADDRESS, radius, fuzzy = FALSE, convert = TRU
 
   if(!require(jsonlite)) {
     message("installing the 'jsonlite' package")
-    install.packages("jsonlite")
+    install.packages("jsonlite",repos = "http://cran.us.r-project.org")
   }
 
   if(!require(httr)) {
     message("installing the 'httr' package")
-    install.packages("httr")
+    install.packages("httr",repos = "http://cran.us.r-project.org")
   }
 
   if(!require(plyr)) {
     message("installing the 'plyr' package")
-    install.packages("plyr")
+    install.packages("plyr",repos = "http://cran.us.r-project.org")
   }
 
   Query <- GNAFAPI::JSONquery(x = x, y = y, id = id,  FULL_ADDRESS = FULL_ADDRESS, radius = radius, convert = convert)

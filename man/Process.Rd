@@ -20,4 +20,3 @@ Process()
 \keyword{GNAF,}
 \keyword{Geocode}
 \keyword{JSON,}
-

@@ -18,4 +18,3 @@ VICMaps()
 }
 \keyword{GNAF,}
 \keyword{VICMaps}
-

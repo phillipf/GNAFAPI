@@ -26,4 +26,3 @@ JSONquery()
 \keyword{JSON}
 \keyword{boundingbox,}
 \keyword{queary,}
-
