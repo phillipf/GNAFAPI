@@ -1,0 +1,7 @@
+setup.py
+EMIS/__init__.py
+EMIS.egg-info/PKG-INFO
+EMIS.egg-info/SOURCES.txt
+EMIS.egg-info/dependency_links.txt
+EMIS.egg-info/requires.txt
+EMIS.egg-info/top_level.txt
